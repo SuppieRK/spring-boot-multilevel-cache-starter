@@ -1,0 +1,119 @@
+import java.nio.charset.StandardCharsets
+
+plugins {
+    // IDE
+    id 'idea'
+
+    // Language
+    id 'java'
+    id 'java-library'
+
+    // Core frameworks
+    id 'org.springframework.boot' version '2.5.3'
+
+    // Publishing
+    id 'com.vanniktech.maven.publish' version '0.17.0'
+
+    // Utility
+    id 'jacoco'
+    id 'org.jetbrains.changelog' version '1.2.1'
+    id 'io.freefair.lombok' version '5.3.3.3'
+    id 'com.diffplug.spotless' version '5.14.2'
+}
+
+group = "$GROUP"
+version = "$VERSION_NAME"
+description = "$POM_DESCRIPTION"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-cache:2.5.3'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis:2.5.3'
+    implementation 'org.springframework.boot:spring-boot-actuator:2.5.3'
+
+    implementation 'io.micrometer:micrometer-core:1.7.2'
+
+    implementation 'com.github.ben-manes.caffeine:caffeine:2.9.2'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:1.7.1'
+
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor:2.5.3'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:2.5.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.16.0'
+    testImplementation 'org.awaitility:awaitility:4.1.0'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// Swap build tasks to build library only
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+    archiveClassifier.set('')
+}
+
+// Enable Spotless code formatting rules
+spotless {
+    java {
+        googleJavaFormat(JavaVersion.VERSION_1_7.toString())
+    }
+
+    lineEndings = 'UNIX'
+}
+
+// Setup changelog plugin
+changelog {
+    version = project.version.toString()
+}
+
+// Setup JaCoCo plugin
+jacocoTestReport {
+    reports {
+        xml.enabled(true)
+    }
+}
+
+// Configure several tasks additionally for Gradle
+tasks.withType(Copy).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = StandardCharsets.UTF_8.name()
+    dependsOn(spotlessJavaCheck)
+}
+
+// Configuring publication
+allprojects {
+    plugins.withId("com.vanniktech.maven.publish") {
+        mavenPublish {
+            sonatypeHost = "S01"
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            def releasesRepoUrl = "$buildDir/publications/releases"
+            def snapshotsRepoUrl = "$buildDir/publications/snapshots"
+            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+        }
+    }
+}
+
+signing { //2
+    if (project.hasProperty('SIGNING_PRIVATE_KEY') && project.hasProperty('SIGNING_PASSWORD')) {
+        println 'Found signing credentials. Signing...'
+        useInMemoryPgpKeys(project.getProperty('SIGNING_PRIVATE_KEY'), project.getProperty('SIGNING_PASSWORD'))
+        println 'Used useInMemoryPgpKeys()'
+    }
+}

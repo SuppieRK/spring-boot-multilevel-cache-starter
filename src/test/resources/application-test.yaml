@@ -1,0 +1,10 @@
+spring:
+  redis:
+    host: ${HOST:localhost}
+    port: ${PORT:6379}
+  cache:
+    type: redis
+    multilevel:
+      use-key-prefix: true
+      key-prefix: "test"
+      time-to-live: 10s

@@ -1,0 +1,116 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2021 Roman Khlebnov
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.github.suppie.spring.cache;
+
+import io.github.suppie.spring.cache.MultiLevelCacheManager.RandomizedLocalExpiryOnWrite;
+import java.time.Duration;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
+import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.springframework.test.context.junit4.SpringRunner;
+
+@Slf4j
+@ActiveProfiles("test")
+@SpringBootTest(
+    classes = {
+      MultiLevelCacheAutoConfiguration.class,
+      RedisAutoConfiguration.class,
+      CacheAutoConfiguration.class
+    })
+@RunWith(SpringRunner.class)
+@ExtendWith(SpringExtension.class)
+class MultiLevelCacheManagerTest {
+  @Autowired MultiLevelCacheManager cacheManager;
+
+  @Test
+  void cacheNamesTest() {
+    final String key = "cacheNamesTest";
+
+    Assertions.assertDoesNotThrow(
+        () -> cacheManager.getCache(key), "Cache should be automatically created upon request");
+    Assertions.assertTrue(
+        cacheManager.getCacheNames().contains(key), "Cache name must be accessible");
+  }
+
+  @Nested
+  class RandomizedLocalExpiryOnWriteTest {
+    @Test
+    void negativeTimeToLive() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.setTimeToLive(Duration.ofSeconds(1).negated());
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiryOnWrite(properties),
+          "Negative TTL must throw an exception");
+    }
+
+    @Test
+    void zeroTimeToLive() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.setTimeToLive(Duration.ZERO);
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiryOnWrite(properties),
+          "Zero TTL must throw an exception");
+    }
+
+    @Test
+    void negativeExpiryJitter() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.getLocal().setExpiryJitter(-1);
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiryOnWrite(properties),
+          "Negative expiry jitter must throw an exception");
+    }
+
+    @Test
+    void tooBigExpiryJitter() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.getLocal().setExpiryJitter(200);
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiryOnWrite(properties),
+          "Too big expiry jitter must throw an exception");
+    }
+  }
+}
