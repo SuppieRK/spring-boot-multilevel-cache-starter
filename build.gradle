@@ -16,6 +16,7 @@ plugins {
 
     // Utility
     id 'jacoco'
+    id 'org.sonarqube' version '3.3'
     id 'org.jetbrains.changelog' version '1.2.1'
     id 'io.freefair.lombok' version '5.3.3.3'
     id 'com.diffplug.spotless' version '5.14.2'
@@ -78,6 +79,15 @@ changelog {
 jacocoTestReport {
     reports {
         xml.enabled(true)
+    }
+}
+
+// Setup SonarCloud
+sonarqube {
+    properties {
+        property 'sonar.projectKey', 'SuppieRK_spring-boot-multilevel-cache-starter'
+        property 'sonar.organization', 'suppierk'
+        property 'sonar.host.url', 'https://sonarcloud.io'
     }
 }
 

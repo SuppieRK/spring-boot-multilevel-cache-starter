@@ -1,6 +1,4 @@
 [![codecov](https://codecov.io/gh/SuppieRK/spring-boot-multilevel-cache-starter/branch/master/graph/badge.svg?token=ABBXFLFW6O)](https://codecov.io/gh/SuppieRK/spring-boot-multilevel-cache-starter)
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/SuppieRK/spring-boot-multilevel-cache-starter.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/SuppieRK/spring-boot-multilevel-cache-starter/alerts/)
-[![Language grade: Java](https://img.shields.io/lgtm/grade/java/g/SuppieRK/spring-boot-multilevel-cache-starter.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/SuppieRK/spring-boot-multilevel-cache-starter/context:java)
 
 # Spring Boot Multi-level cache starter
 
