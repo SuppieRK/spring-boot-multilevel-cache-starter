@@ -110,7 +110,7 @@ publishing {
     }
 }
 
-signing { //2
+signing {
     if (project.hasProperty('SIGNING_PRIVATE_KEY') && project.hasProperty('SIGNING_PASSWORD')) {
         println 'Found signing credentials. Signing...'
         useInMemoryPgpKeys(project.getProperty('SIGNING_PRIVATE_KEY'), project.getProperty('SIGNING_PASSWORD'))
