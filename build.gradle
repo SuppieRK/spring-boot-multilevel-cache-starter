@@ -88,6 +88,7 @@ sonarqube {
         property 'sonar.projectKey', 'SuppieRK_spring-boot-multilevel-cache-starter'
         property 'sonar.organization', 'suppierk'
         property 'sonar.host.url', 'https://sonarcloud.io'
+        property 'sonar.coverage.jacoco.xmlReportPaths', 'build/**/jacocoTestReport.xml'
     }
 }
 

@@ -1,4 +1,8 @@
 [![codecov](https://codecov.io/gh/SuppieRK/spring-boot-multilevel-cache-starter/branch/master/graph/badge.svg?token=ABBXFLFW6O)](https://codecov.io/gh/SuppieRK/spring-boot-multilevel-cache-starter)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=sqale_rating)](https://sonarcloud.io/dashboard?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=reliability_rating)](https://sonarcloud.io/dashboard?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=security_rating)](https://sonarcloud.io/dashboard?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=bugs)](https://sonarcloud.io/dashboard?id=SuppieRK_spring-boot-multilevel-cache-starter)
 
 # Spring Boot Multi-level cache starter
 
