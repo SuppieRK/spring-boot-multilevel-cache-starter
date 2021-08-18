@@ -45,7 +45,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.cache.Cache;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.MessageListener;
@@ -220,14 +219,19 @@ public class MultiLevelCacheAutoConfiguration {
 
         if (!StringUtils.hasText(cacheName)) return;
 
-        Cache cache = cacheManager.getCache(cacheName);
+        MultiLevelCache cache = (MultiLevelCache) cacheManager.getCache(cacheName);
 
         if (cache == null) return;
 
         log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
 
-        if (entryKey == null) cache.clear();
-        else cache.evict(entryKey);
+        if (entryKey == null) cache.localClear();
+        else cache.localEvict(entryKey);
+      } catch (ClassCastException e) {
+        log.error(
+            "Cannot cast cache instance returned by cache manager to "
+                + MultiLevelCache.class.getName(),
+            e);
       } catch (Exception e) {
         log.debug("Unknown Redis message", e);
       }

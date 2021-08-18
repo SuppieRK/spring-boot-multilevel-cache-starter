@@ -282,10 +282,22 @@ public class MultiLevelCache extends RedisCache {
    */
   @Override
   public void evict(@NonNull Object key) {
+    sendViaRedis(localEvict(key));
+  }
+
+  /**
+   * Local copy of {@link #evict(Object)} method for Redis Pub/Sub listener to avoid infinite
+   * message loop
+   *
+   * @param key the key whose mapping is to be removed from the cache
+   * @return computed key for entry to evict
+   * @see #evict(Object)
+   */
+  String localEvict(@NonNull Object key) {
     final String localKey = convertKey(key);
     localCache.invalidate(localKey);
     callRedis(() -> super.evict(key));
-    sendViaRedis(localKey);
+    return localKey;
   }
 
   /**
@@ -329,9 +341,18 @@ public class MultiLevelCache extends RedisCache {
    */
   @Override
   public void clear() {
+    localClear();
+    sendViaRedis(null);
+  }
+
+  /**
+   * Local copy of {@link #clear()} method for Redis Pub/Sub listener to avoid infinite message loop
+   *
+   * @see #clear()
+   */
+  void localClear() {
     localCache.invalidateAll();
     callRedis(super::clear);
-    sendViaRedis(null);
   }
 
   /**
