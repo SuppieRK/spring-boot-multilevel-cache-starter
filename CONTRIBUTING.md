@@ -7,11 +7,11 @@ Please note we have a code of conduct, please follow it in all your interactions
 
 ## Pull Request Process
 
-1. Ensure any install or build dependencies are removed before the end of the layer when doing a
+1. Ensure any installation or build dependencies are removed before the end of the layer when doing a
    build.
 2. Update the README.md with details of changes to the interface, this includes new environment
    variables, exposed ports, useful file locations and container parameters.
-3. Increase the version numbers in any examples files and the README.md to the new version that this
+3. Increase the version numbers in any example files and the README.md to the new version that this
    Pull Request would represent. The versioning scheme we use is [SemVer](http://semver.org/).
 4. You may merge the Pull Request in once you have the sign-off of two other developers, or if you
    do not have permission to do that, you may request the second reviewer to merge it for you.
@@ -33,7 +33,7 @@ For further reference, please consider the following sections:
 
 This library defines all artifact versions without Maven Bill of Materials because of:
 
-* Ease of use with [Intellij IDEA Package Search](https://blog.jetbrains.com/idea/2021/06/intellij-idea-2021-2-eap-2/?_gl=1*17t2ibb*_ga*MjE4Mjk3MC4xNjI3NTg1MTk1*_ga_5779HKX92V*MTYyNzU4NTE5OC4xLjAuMTYyNzU4NTE5OC4w#package_search_integration%60}#package_search_integration) functionality
+* Ease of use with [IntelliJ IDEA Package Search](https://blog.jetbrains.com/idea/2021/06/intellij-idea-2021-2-eap-2/?_gl=1*17t2ibb*_ga*MjE4Mjk3MC4xNjI3NTg1MTk1*_ga_5779HKX92V*MTYyNzU4NTE5OC4xLjAuMTYyNzU4NTE5OC4w#package_search_integration%60}#package_search_integration) functionality
 * Ease of use with [Dependabot](https://dependabot.com/)
 
 ### Build tools
@@ -61,7 +61,7 @@ This library defines all artifact versions without Maven Bill of Materials becau
 ### Our Pledge
 
 In the interest of fostering an open and welcoming environment, we as
-contributors and maintainers pledge to making participation in our project and
+contributors and maintainers pledge to make participation in our project and
 our community a harassment-free experience for everyone, regardless of age, body
 size, disability, ethnicity, gender identity and expression, level of experience,
 nationality, personal appearance, race, religion, or sexual identity and
@@ -86,7 +86,7 @@ Examples of unacceptable behavior by participants include:
 * Public or private harassment
 * Publishing others' private information, such as a physical or electronic
   address, without explicit permission
-* Other conduct which could reasonably be considered inappropriate in a
+* Another conduct that could reasonably be considered inappropriate in a
   professional setting
 
 ### Our Responsibilities
@@ -114,8 +114,8 @@ further defined and clarified by project maintainers.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported by contacting the project team at [INSERT EMAIL ADDRESS]. All
-complaints will be reviewed and investigated and will result in a response that
-is deemed necessary and appropriate to the circumstances. The project team is
+complaints will be reviewed and investigated and will result in a response 
+deemed necessary and appropriate to the circumstances. The project team is
 obligated to maintain confidentiality with regard to the reporter of an incident.
 Further details of specific enforcement policies may be posted separately.
 

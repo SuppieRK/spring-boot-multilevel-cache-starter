@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.metrics.cache.CacheMeterBinderProvider;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
@@ -98,25 +99,28 @@ public class MultiLevelCacheAutoConfiguration {
   public MultiLevelCacheManager cacheManager(
       ObjectProvider<CacheProperties> highLevelCacheProperties,
       MultiLevelCacheConfigurationProperties cacheProperties,
+      @Qualifier(CIRCUIT_BREAKER_NAME) CircuitBreaker circuitBreaker,
       RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
-    CircuitBreaker circuitBreaker = cacheCircuitBreaker(cacheProperties);
     return new MultiLevelCacheManager(
         highLevelCacheProperties, cacheProperties, multiLevelCacheRedisTemplate, circuitBreaker);
   }
 
-  /** @return cache meter binder for local level of multi level cache */
+  /**
+   * @return cache meter binder for local level of multi level cache
+   */
   @Bean
   @ConditionalOnBean(MultiLevelCacheManager.class)
   @ConditionalOnClass({MeterBinder.class, CacheMeterBinderProvider.class})
   public CacheMeterBinderProvider<MultiLevelCache> multiLevelCacheCacheMeterBinderProvider() {
-    return (cache, tags) -> new CaffeineCacheMetrics(cache.getLocalCache(), cache.getName(), tags);
+    return (cache, tags) ->
+        new CaffeineCacheMetrics<>(cache.getLocalCache(), cache.getName(), tags);
   }
 
   /**
    * @param cacheProperties for multi-level cache
    * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
    * @param cacheManager for multi-level caching
-   * @return Redis topic listener to coordinate entries eviction
+   * @return Redis topic listener to coordinate entry eviction
    */
   @Bean
   public RedisMessageListenerContainer multiLevelCacheRedisMessageListenerContainer(
@@ -136,11 +140,12 @@ public class MultiLevelCacheAutoConfiguration {
    * @param cacheProperties to get circuit breaker properties for fault tolerance
    * @return circuit breaker to handle Redis connection exceptions and fallback to use local cache
    */
-  static CircuitBreaker cacheCircuitBreaker(
+  @Bean(name = CIRCUIT_BREAKER_NAME)
+  public CircuitBreaker cacheCircuitBreaker(
       MultiLevelCacheConfigurationProperties cacheProperties) {
     CircuitBreakerRegistry cbr = CircuitBreakerRegistry.ofDefaults();
 
-    if (!cbr.getConfiguration(CIRCUIT_BREAKER_CONFIGURATION_NAME).isPresent()) {
+    if (cbr.getConfiguration(CIRCUIT_BREAKER_CONFIGURATION_NAME).isEmpty()) {
       CircuitBreakerProperties props = cacheProperties.getCircuitBreaker();
 
       CircuitBreakerConfig.Builder cbc = CircuitBreakerConfig.custom();
@@ -177,7 +182,8 @@ public class MultiLevelCacheAutoConfiguration {
         .onError(
             event ->
                 log.trace(
-                    "Cache circuit breaker error occurred in " + event.getElapsedDuration(),
+                    "Cache circuit breaker error occurred in {}",
+                    event.getElapsedDuration(),
                     event.getThrowable()))
         .onSlowCallRateExceeded(
             event ->
@@ -201,7 +207,7 @@ public class MultiLevelCacheAutoConfiguration {
   /**
    * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
    * @param cacheManager for multi-level caching
-   * @return Redis topic message listener to coordinate entries eviction
+   * @return Redis topic message listener to coordinate entry eviction
    */
   private static MessageListener createMessageListener(
       RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
@@ -229,8 +235,8 @@ public class MultiLevelCacheAutoConfiguration {
         else cache.localEvict(entryKey);
       } catch (ClassCastException e) {
         log.error(
-            "Cannot cast cache instance returned by cache manager to "
-                + MultiLevelCache.class.getName(),
+            "Cannot cast cache instance returned by cache manager to {}",
+            MultiLevelCache.class.getName(),
             e);
       } catch (Exception e) {
         log.debug("Unknown Redis message", e);

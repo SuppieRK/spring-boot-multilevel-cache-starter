@@ -1,19 +1,13 @@
 # This workflow will build a Java project with Gradle
 # For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-gradle
 
-name: Java CI with Gradle for master branch
+name: Java CI with Gradle for Pull Requests
 
 on:
   workflow_dispatch: {}
-  push:
-    branches: [ master ]
-    paths-ignore:
-      - '**.yml'
-      - '**.md'
-      - '**/gradle-wrapper.jar'
-      - '**/gradle-wrapper.properties'
-      - '**/gradlew'
-      - '**/gradlew.bat'
+  pull_request:
+    branches-ignore:
+      - master
 
 jobs:
   build:
@@ -42,11 +36,3 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build
-
-      - name: Publish to Maven Central
-        run: ./gradlew publishAllPublicationsToMavenCentral --no-configuration-cache
-        env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_MAVENCENTRALUSERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_MAVENCENTRALPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}

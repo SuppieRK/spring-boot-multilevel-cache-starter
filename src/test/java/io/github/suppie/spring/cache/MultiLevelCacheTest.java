@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,40 +32,39 @@ import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
-import lombok.extern.slf4j.Slf4j;
 import org.awaitility.Awaitility;
-import org.checkerframework.checker.units.qual.A;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.cache.Cache;
-import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
-import org.springframework.test.context.junit4.SpringRunner;
 
-@Slf4j
 @ActiveProfiles("test")
 @SpringBootTest(
     classes = {
-      MultiLevelCacheAutoConfiguration.class,
       RedisAutoConfiguration.class,
-      CacheAutoConfiguration.class
+      CacheAutoConfiguration.class,
+      MultiLevelCacheAutoConfiguration.class,
+      MultiLevelCacheManager.class
     })
-@RunWith(SpringRunner.class)
-@ExtendWith(SpringExtension.class)
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class MultiLevelCacheTest {
   private static final AtomicInteger COUNTER = new AtomicInteger(0);
 
   @Autowired MultiLevelCacheManager cacheManager;
+
+  @MockBean RedisMessageListenerContainer redisMessageListenerContainer;
+
+  @MockBean RedisConnection redisConnection;
+  @MockBean RedisConnectionFactory redisConnectionFactory;
 
   @ParameterizedTest
   @MethodSource("operations")
@@ -78,6 +77,8 @@ class MultiLevelCacheTest {
     Assertions.assertNotNull(cache, "Cache should be automatically created upon request");
 
     CircuitBreaker cb = cacheManager.getCircuitBreaker();
+    cb.transitionToClosedState();
+
     Assertions.assertNotNull(cb, "Cache must have circuit breaker defined");
     Assertions.assertEquals(
         State.CLOSED,

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,31 +26,24 @@ package io.github.suppie.spring.cache;
 
 import io.github.suppie.spring.cache.MultiLevelCacheManager.RandomizedLocalExpiryOnWrite;
 import java.time.Duration;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
-import org.springframework.test.context.junit4.SpringRunner;
 
-@Slf4j
 @ActiveProfiles("test")
 @SpringBootTest(
     classes = {
-      MultiLevelCacheAutoConfiguration.class,
       RedisAutoConfiguration.class,
-      CacheAutoConfiguration.class
+      CacheAutoConfiguration.class,
+      MultiLevelCacheAutoConfiguration.class,
+      MultiLevelCacheManager.class
     })
-@RunWith(SpringRunner.class)
-@ExtendWith(SpringExtension.class)
-class MultiLevelCacheManagerTest {
+class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
   @Autowired MultiLevelCacheManager cacheManager;
 
   @Test

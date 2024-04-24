@@ -1,7 +1,8 @@
 spring:
-  redis:
-    host: ${HOST:localhost}
-    port: ${PORT:6379}
+  data:
+    redis:
+      host: ${HOST:localhost}
+      port: ${PORT:6379}
   cache:
     type: redis
     multilevel:

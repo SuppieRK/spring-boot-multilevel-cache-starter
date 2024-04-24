@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -62,9 +61,7 @@ public class MultiLevelCacheManager implements CacheManager {
       CircuitBreaker circuitBreaker) {
     CacheProperties hlp = highLevelProperties.getIfAvailable();
     this.requestedCacheNames =
-        hlp == null
-            ? Collections.emptySet()
-            : Collections.unmodifiableSet(new HashSet<>(hlp.getCacheNames()));
+        hlp == null ? Collections.emptySet() : Set.copyOf(hlp.getCacheNames());
 
     this.properties = properties;
     this.redisTemplate = redisTemplate;
@@ -76,6 +73,7 @@ public class MultiLevelCacheManager implements CacheManager {
   }
 
   // Workarounds for tests
+
   MultiLevelCacheConfigurationProperties getProperties() {
     return properties;
   }
@@ -83,6 +81,7 @@ public class MultiLevelCacheManager implements CacheManager {
   CircuitBreaker getCircuitBreaker() {
     return circuitBreaker;
   }
+
   // Workarounds for tests
 
   /**
@@ -122,7 +121,7 @@ public class MultiLevelCacheManager implements CacheManager {
     return Collections.unmodifiableSet(availableCaches.keySet());
   }
 
-  /** Expiry policy enabling randomized expiry on write for local entities */
+  /** Expiry policy enabling randomized expiry on writing for local entities */
   static class RandomizedLocalExpiryOnWrite implements Expiry<Object, Object> {
 
     private final Random random;

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,7 @@ public class MultiLevelCacheConfigurationProperties {
   /** Whether to use the key prefix when writing to Redis. */
   private boolean useKeyPrefix = false;
 
-  /** Topic to use in order to synchronize eviction of entries */
+  /** Topic to use to synchronize eviction of entries */
   private String topic = "cache:multilevel:topic";
 
   /** Small subset of local cache settings */
@@ -55,14 +55,18 @@ public class MultiLevelCacheConfigurationProperties {
   @NestedConfigurationProperty
   private CircuitBreakerProperties circuitBreaker = new CircuitBreakerProperties();
 
-  /** @return configuration for Redis cache */
+  /**
+   * @return configuration for Redis cache
+   */
   public RedisCacheConfiguration toRedisCacheConfiguration() {
     RedisCacheConfiguration configuration =
         RedisCacheConfiguration.defaultCacheConfig()
             .disableCachingNullValues()
             .entryTtl(timeToLive);
 
-    if (useKeyPrefix) configuration.prefixCacheNameWith(keyPrefix);
+    if (useKeyPrefix) {
+      configuration.prefixCacheNameWith(keyPrefix);
+    }
 
     return configuration;
   }
@@ -70,17 +74,17 @@ public class MultiLevelCacheConfigurationProperties {
   @Data
   public static class LocalCacheProperties {
 
-    /** Maximum amount of entities too store in local cache */
+    /** Maximum number of entities too store in local cache */
     private int maxSize = 2000;
 
-    /** Percent of time deviation for local cache entry expiration */
+    /** Percentage of time deviation for local cache entry expiration */
     private int expiryJitter = 50;
   }
 
   /**
    * Circuit breaker just records calls to Redis - it does not time out them.
    *
-   * <p>To simplify defaults, we rely on 4 core properties:
+   * <p>To simplify defaults, we rely on four core properties:
    *
    * <ul>
    *   <li>{@code failureRateThreshold}
@@ -90,7 +94,7 @@ public class MultiLevelCacheConfigurationProperties {
    * </ul>
    *
    * To compute appropriate values for your properties - use your slow calls as a baseline and
-   * consider sliding window type:
+   * consider a sliding window type:
    *
    * <ul>
    *   <li>Assuming that call is considered to be slow after 250ms
@@ -106,19 +110,19 @@ public class MultiLevelCacheConfigurationProperties {
   @Data
   public static class CircuitBreakerProperties {
 
-    /** Percent of call failures to prohibit further calls to Redis */
+    /** Percentage of call failures to prohibit further calls to Redis */
     private int failureRateThreshold = 25;
 
-    /** Percent of slow calls to prohibit further calls to Redis */
+    /** Percentage of slow calls to prohibit further calls to Redis */
     private int slowCallRateThreshold = 25;
 
     /** Defines the duration after which Redis call considered to be slow */
     private Duration slowCallDurationThreshold = Duration.ofMillis(250);
 
-    /** Sliding window type for connectivity analysis */
+    /** A sliding window type for connectivity analysis */
     private SlidingWindowType slidingWindowType = SlidingWindowType.COUNT_BASED;
 
-    /** Amount of Redis calls to test if backend is responsive when circuit breaker closes */
+    /** Amount of Redis calls to test if backend is responsive when a circuit breaker closes */
     private int permittedNumberOfCallsInHalfOpenState =
         (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos());
 

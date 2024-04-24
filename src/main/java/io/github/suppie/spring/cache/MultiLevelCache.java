@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,9 @@ package io.github.suppie.spring.cache;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.vavr.CheckedFunction0;
-import io.vavr.control.Try;
+import io.github.resilience4j.core.functions.CheckedSupplier;
+import io.github.suppierk.java.util.Try;
+import io.github.suppierk.java.util.function.ThrowableSupplier;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Callable;
@@ -38,8 +39,11 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.data.redis.cache.RedisCache;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.RedisSerializer;
 
 /**
  * Multi-level cache implementation
@@ -74,6 +78,15 @@ public class MultiLevelCache extends RedisCache {
 
   private final RedisTemplate<Object, Object> redisTemplate;
 
+  /**
+   * Initializes a new instance of the MultiLevelCache class with the given parameters.
+   *
+   * @param name The name of the cache.
+   * @param properties The configuration properties for the cache.
+   * @param redisTemplate The Redis template used for accessing the Redis cache.
+   * @param localCache The local cache used as an additional level of caching.
+   * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   */
   public MultiLevelCache(
       String name,
       MultiLevelCacheConfigurationProperties properties,
@@ -90,6 +103,16 @@ public class MultiLevelCache extends RedisCache {
         cacheCircuitBreaker);
   }
 
+  /**
+   * Creates a new instance of MultiLevelCache.
+   *
+   * @param name The name of the cache.
+   * @param properties The configuration properties for the cache.
+   * @param redisCacheWriter The Redis cache writer to use.
+   * @param redisTemplate The Redis template used for accessing the Redis cache.
+   * @param localCache The local cache used as an additional level of caching.
+   * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   */
   public MultiLevelCache(
       String name,
       MultiLevelCacheConfigurationProperties properties,
@@ -97,7 +120,7 @@ public class MultiLevelCache extends RedisCache {
       RedisTemplate<Object, Object> redisTemplate,
       Cache<Object, Object> localCache,
       CircuitBreaker cacheCircuitBreaker) {
-    super(name, redisCacheWriter, properties.toRedisCacheConfiguration());
+    super(name, redisCacheWriter, adjustRedisCacheConfiguration(properties, redisTemplate));
 
     this.properties = properties;
     this.redisTemplate = redisTemplate;
@@ -111,6 +134,7 @@ public class MultiLevelCache extends RedisCache {
   }
 
   // Workarounds for tests
+
   Cache<Object, Object> getLocalCache() {
     return localCache;
   }
@@ -122,17 +146,18 @@ public class MultiLevelCache extends RedisCache {
   }
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
-    callRedis(() -> super.put(key, value));
+    super.put(key, value);
   }
+
   // Workarounds for tests
 
   /**
    * Perform an actual lookup in the underlying store.
    *
-   * <p>We do not allow storing {@code null} values, if local cache does not have mapping for
+   * <p>We do not allow storing {@code null} values, if local cache does not have a mapping for
    * specified key we query Redis using circuit breaker and error handling logic. If Redis contains
-   * requested mapping, value will be saved in local cache. If Redis is not available, {@code null}
-   * will be returned.
+   * requested mapping, the value will be saved in the local cache. If Redis is not available,
+   * {@code null} will be returned.
    *
    * @param key the key whose associated value is to be returned
    * @return the raw store value for the key, or {@code null} if none
@@ -144,9 +169,12 @@ public class MultiLevelCache extends RedisCache {
 
     if (localValue == null) {
       return callRedis(() -> super.lookup(key))
-          .andThen(value -> localCache.put(localKey, value))
-          .recover(e -> null)
-          .get();
+          .map(
+              value -> {
+                localCache.put(localKey, value);
+                return value;
+              })
+          .orElse(() -> null);
     }
 
     return localValue;
@@ -174,22 +202,29 @@ public class MultiLevelCache extends RedisCache {
   @SuppressWarnings("unchecked")
   public synchronized <T> T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
     Object result = lookup(key);
-    if (result != null) return (T) result;
+
+    if (result != null) {
+      return (T) result;
+    }
 
     final String localKey = convertKey(key);
     return callRedis(() -> super.get(key, valueLoader))
-        .andThen(value -> localCache.put(localKey, value))
-        .recover(
-            e -> {
-              try {
-                T value = valueLoader.call();
-                localCache.put(localKey, value);
-                return value;
-              } catch (Exception recoverException) {
-                throw new ValueRetrievalException(key, valueLoader, recoverException);
-              }
+        .map(
+            value -> {
+              localCache.put(localKey, value);
+              return value;
             })
-        .get();
+        .orElse(
+            (ThrowableSupplier<T>)
+                () -> {
+                  try {
+                    T value = valueLoader.call();
+                    localCache.put(localKey, value);
+                    return value;
+                  } catch (Exception recoverException) {
+                    throw new ValueRetrievalException(key, valueLoader, recoverException);
+                  }
+                });
   }
 
   /**
@@ -200,9 +235,10 @@ public class MultiLevelCache extends RedisCache {
    *
    * <p>If value is {@code null} specified key will be evicted.
    *
-   * <p>Actual registration performed in an asynchronous fashion, with subsequent lookups possibly
-   * not seeing the entry yet. Use {@link #putIfAbsent} for guaranteed immediate registration for
-   * current cache.
+   * <p>Actual registration performed in an asynchronous fashion, with later lookups possibly not
+   * seeing the entry yet.
+   *
+   * <p>Use {@link #putIfAbsent} for guaranteed immediate registration for current cache.
    *
    * @param key the key with which the specified value is to be associated
    * @param value the value to be associated with the specified key
@@ -273,7 +309,7 @@ public class MultiLevelCache extends RedisCache {
   /**
    * Evict the mapping for this key from this cache if it is present.
    *
-   * <p>Actual eviction performed in an asynchronous fashion, with subsequent lookups possibly still
+   * <p>Actual eviction performed in an asynchronous fashion, with later lookups possibly still
    * seeing the entry. Use {@link #evictIfPresent} for guaranteed immediate removal for current
    * cache.
    *
@@ -302,7 +338,7 @@ public class MultiLevelCache extends RedisCache {
 
   /**
    * Evict the mapping for this key from this cache if it is present, expecting the key to be
-   * immediately invisible for subsequent lookups.
+   * immediately invisible for later lookups.
    *
    * @param key the key whose mapping is to be removed from the cache
    * @return {@code true} if local cache was known to have a mapping for this key before, {@code
@@ -333,7 +369,7 @@ public class MultiLevelCache extends RedisCache {
   /**
    * Clear the cache through removing all mappings.
    *
-   * <p>Actual clearing performed in an asynchronous fashion, with subsequent lookups possibly still
+   * <p>Actual clearing performed in an asynchronous fashion, with later lookups possibly still
    * seeing the entries. Use {@link #invalidate()} for guaranteed immediate removal of entries for
    * current cache.
    *
@@ -350,14 +386,15 @@ public class MultiLevelCache extends RedisCache {
    *
    * @see #clear()
    */
+  @SuppressWarnings("squid:S1612")
   void localClear() {
     localCache.invalidateAll();
-    callRedis(super::clear);
+    callRedis(() -> super.clear());
   }
 
   /**
    * Invalidate the cache through removing all mappings, expecting all entries to be immediately
-   * invisible for subsequent lookups.
+   * invisible for later lookups.
    *
    * @return {@code true} if local cache was known to have mappings before, {@code false} if it did
    *     not (or if prior presence of entries could not be determined)
@@ -365,6 +402,7 @@ public class MultiLevelCache extends RedisCache {
    * @since 5.2
    */
   @Override
+  @SuppressWarnings("squid:S1612")
   public boolean invalidate() {
     final ReentrantLock lock = makeLock(CACHE_WIDE_LOCK_OBJECT);
 
@@ -374,7 +412,7 @@ public class MultiLevelCache extends RedisCache {
       boolean hadLocalMappings = localCache.estimatedSize() > 0;
 
       localCache.invalidateAll();
-      callRedis(super::clear);
+      callRedis(() -> super.clear());
       sendViaRedis(null);
 
       return hadLocalMappings;
@@ -383,26 +421,37 @@ public class MultiLevelCache extends RedisCache {
     }
   }
 
-  /** @param call to Redis */
+  /**
+   * @param call to Redis
+   */
   private void callRedis(@NonNull Runnable call) {
-    Try.runRunnable(cacheCircuitBreaker.decorateRunnable(call));
+    Try.of(
+        () -> {
+          cacheCircuitBreaker.decorateRunnable(call);
+          return null;
+        });
   }
 
   /**
    * @param call to Redis
    * @return execution result as {@link Try}
    */
-  private <T> Try<T> callRedis(@NonNull CheckedFunction0<T> call) {
-    return Try.of(cacheCircuitBreaker.decorateCheckedSupplier(call));
+  private <T> Try<T> callRedis(@NonNull CheckedSupplier<T> call) {
+    return Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
   }
 
-  /** @param key to send notification about eviction. Can be {@code null}. */
+  /**
+   * @param key to send notification about eviction. Can be {@code null}.
+   */
   private void sendViaRedis(@Nullable String key) {
-    Try.runRunnable(
-        cacheCircuitBreaker.decorateRunnable(
-            () ->
-                redisTemplate.convertAndSend(
-                    properties.getTopic(), new MultiLevelCacheEvictMessage(getName(), key))));
+    Try.of(
+        () -> {
+          cacheCircuitBreaker.decorateRunnable(
+              () ->
+                  redisTemplate.convertAndSend(
+                      properties.getTopic(), new MultiLevelCacheEvictMessage(getName(), key)));
+          return null;
+        });
   }
 
   /**
@@ -413,5 +462,25 @@ public class MultiLevelCache extends RedisCache {
   private ReentrantLock makeLock(@NonNull Object key) {
     return Objects.requireNonNull(
         locks.get(key, o -> new ReentrantLock()), LOCK_WAS_NOT_INITIALIZED);
+  }
+
+  /**
+   * Adjusts the RedisCacheConfiguration based on the provided properties and RedisTemplate.
+   *
+   * @param properties The MultiLevelCacheConfigurationProperties used to create the
+   *     RedisCacheConfiguration.
+   * @param redisTemplate The RedisTemplate used to get the value serializer for
+   *     RedisSerializationContext.
+   * @return The adjusted RedisCacheConfiguration with updated serialization for values.
+   */
+  private static RedisCacheConfiguration adjustRedisCacheConfiguration(
+      MultiLevelCacheConfigurationProperties properties,
+      RedisTemplate<Object, Object> redisTemplate) {
+    RedisCacheConfiguration configuration = properties.toRedisCacheConfiguration();
+    RedisSerializer<?> valueSerializer = redisTemplate.getValueSerializer();
+    configuration =
+        configuration.serializeValuesWith(
+            RedisSerializationContext.SerializationPair.fromSerializer(valueSerializer));
+    return configuration;
   }
 }

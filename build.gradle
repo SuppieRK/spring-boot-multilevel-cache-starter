@@ -9,46 +9,85 @@ plugins {
     id 'java-library'
 
     // Core frameworks
-    id 'org.springframework.boot' version '2.5.3'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
 
     // Publishing
-    id 'com.vanniktech.maven.publish' version '0.17.0'
+    id 'com.vanniktech.maven.publish' version '0.28.0'
 
     // Utility
-    id 'jacoco'
-    id 'org.sonarqube' version '3.3'
-    id 'org.jetbrains.changelog' version '1.2.1'
-    id 'io.freefair.lombok' version '5.3.3.3'
-    id 'com.diffplug.spotless' version '5.14.2'
+//    id 'jacoco'
+    id 'com.diffplug.spotless' version '6.25.0'
 }
 
+// Project properties
 group = "$GROUP"
 version = "$VERSION_NAME"
 description = "$POM_DESCRIPTION"
+
+// Source code properties
+java {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    compileJava.options.encoding = 'UTF-8'
+}
 
 repositories {
     mavenCentral()
 }
 
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+ext {
+    set('springCloudVersion', "2023.0.1")
+}
+
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-cache:2.5.3'
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis:2.5.3'
-    implementation 'org.springframework.boot:spring-boot-actuator:2.5.3'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-actuator'
 
-    implementation 'io.micrometer:micrometer-core:1.7.2'
+    implementation 'io.micrometer:micrometer-core'
 
-    implementation 'com.github.ben-manes.caffeine:caffeine:2.9.2'
-    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:1.7.1'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker'
 
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor:2.5.3'
+    // For exception handling utilities
+    // See https://github.com/SuppieRK/java-throwable-utils
+    implementation 'io.github.suppierk:java-throwable-utils:1.0.3'
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test:2.5.3'
-    testImplementation 'org.testcontainers:junit-jupiter:1.16.0'
-    testImplementation 'org.awaitility:awaitility:4.1.0'
+    compileOnly 'org.projectlombok:lombok'
+
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.awaitility:awaitility'
+
+    testImplementation 'org.testcontainers:junit-jupiter'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
 }
 
 test {
     useJUnitPlatform()
+}
+
+// Enable Spotless code formatting rules
+spotless {
+    java {
+        googleJavaFormat()
+    }
+
+    lineEndings = 'UNIX'
 }
 
 // Swap build tasks to build library only
@@ -61,35 +100,20 @@ jar {
     archiveClassifier.set('')
 }
 
-// Enable Spotless code formatting rules
-spotless {
-    java {
-        googleJavaFormat(JavaVersion.VERSION_1_7.toString())
-    }
-
-    lineEndings = 'UNIX'
+task sourceJar(type: Jar, dependsOn: classes) {
+    archiveClassifier.set('sources')
+    from sourceSets.main.allSource
 }
 
-// Setup changelog plugin
-changelog {
-    version = project.version.toString()
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    archiveClassifier.set('javadoc')
+    from javadoc.destinationDir
 }
 
-// Setup JaCoCo plugin
-jacocoTestReport {
-    reports {
-        xml.enabled(true)
-    }
-}
-
-// Setup SonarCloud
-sonarqube {
-    properties {
-        property 'sonar.projectKey', 'SuppieRK_spring-boot-multilevel-cache-starter'
-        property 'sonar.organization', 'suppierk'
-        property 'sonar.host.url', 'https://sonarcloud.io'
-        property 'sonar.coverage.jacoco.xmlReportPaths', 'build/**/jacocoTestReport.xml'
-    }
+artifacts {
+    archives jar
+    archives javadocJar
+    archives sourceJar
 }
 
 // Configure several tasks additionally for Gradle
@@ -102,29 +126,11 @@ tasks.withType(JavaCompile).configureEach {
     dependsOn(spotlessJavaCheck)
 }
 
-// Configuring publication
-allprojects {
-    plugins.withId("com.vanniktech.maven.publish") {
-        mavenPublish {
-            sonatypeHost = "S01"
-        }
-    }
+tasks.withType(Copy).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
-publishing {
-    repositories {
-        maven {
-            def releasesRepoUrl = "$buildDir/publications/releases"
-            def snapshotsRepoUrl = "$buildDir/publications/snapshots"
-            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
-        }
-    }
-}
-
-signing {
-    if (project.hasProperty('SIGNING_PRIVATE_KEY') && project.hasProperty('SIGNING_PASSWORD')) {
-        println 'Found signing credentials. Signing...'
-        useInMemoryPgpKeys(project.getProperty('SIGNING_PRIVATE_KEY'), project.getProperty('SIGNING_PASSWORD'))
-        println 'Used useInMemoryPgpKeys()'
-    }
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = StandardCharsets.UTF_8.name()
+    dependsOn(spotlessJavaCheck)
 }

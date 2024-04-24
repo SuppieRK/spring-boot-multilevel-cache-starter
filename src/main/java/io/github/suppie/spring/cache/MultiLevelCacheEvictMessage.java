@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,18 +24,19 @@
 
 package io.github.suppie.spring.cache;
 
+import java.io.Serial;
 import java.io.Serializable;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Small message used by this caching library in order to sync eviction of entries when necessary
- */
+/** Small message used by this caching library to sync eviction of entries when necessary */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class MultiLevelCacheEvictMessage implements Serializable {
+  @Serial private static final long serialVersionUID = -6839296295008213886L;
+
   private String cacheName;
   private String entryKey;
 }

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2021 Roman Khlebnov
+ * Copyright (c) 2024 Roman Khlebnov
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ import org.springframework.boot.context.annotation.UserConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
-class MultiLevelCacheAutoConfigurationTest {
+class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest {
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
           .withConfiguration(
@@ -50,6 +50,8 @@ class MultiLevelCacheAutoConfigurationTest {
   @Test
   void instantiationTest() {
     runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
         .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
         .run(
             context -> {
@@ -66,6 +68,8 @@ class MultiLevelCacheAutoConfigurationTest {
     final String cache2 = "cache2";
 
     runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
         .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
         .withPropertyValues("spring.cache.cache-names=" + cache1)
         .run(
@@ -87,6 +91,8 @@ class MultiLevelCacheAutoConfigurationTest {
   @MethodSource("incorrectCacheTypes")
   void instantiationTestWithDifferentCacheTypes(CacheType cacheType) {
     runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
         .withPropertyValues("spring.cache.type=" + cacheType.name().toLowerCase())
         .run(
             context -> {
