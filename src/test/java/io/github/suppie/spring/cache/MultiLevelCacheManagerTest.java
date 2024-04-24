@@ -26,6 +26,7 @@ package io.github.suppie.spring.cache;
 
 import io.github.suppie.spring.cache.MultiLevelCacheManager.RandomizedLocalExpiry;
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -57,7 +58,7 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
   }
 
   @Nested
-  class RandomizedLocalExpiryOnWriteTest {
+  class RandomizedLocalExpiryTest {
     @Test
     void negativeTimeToLive() {
       MultiLevelCacheConfigurationProperties properties =
@@ -104,6 +105,30 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
           IllegalArgumentException.class,
           () -> new RandomizedLocalExpiry(properties),
           "Too big expiry jitter must throw an exception");
+    }
+
+    @Test
+    void negativeLocalTimeToLive() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.getLocal().setTimeToLive(Optional.of(Duration.ofSeconds(1).negated()));
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiry(properties),
+          "Negative TTL must throw an exception");
+    }
+
+    @Test
+    void zeroLocalTimeToLive() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.getLocal().setTimeToLive(Optional.of(Duration.ZERO));
+
+      Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> new RandomizedLocalExpiry(properties),
+          "Zero TTL must throw an exception");
     }
   }
 }
