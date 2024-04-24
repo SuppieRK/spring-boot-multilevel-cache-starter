@@ -29,14 +29,13 @@ The following guides illustrate how to use some features concretely:
 
 For further reference, please consider the following sections:
 
-### Libraries declaration and updates
-
-This library defines all artifact versions without Maven Bill of Materials because of:
-
-* Ease of use with [IntelliJ IDEA Package Search](https://blog.jetbrains.com/idea/2021/06/intellij-idea-2021-2-eap-2/?_gl=1*17t2ibb*_ga*MjE4Mjk3MC4xNjI3NTg1MTk1*_ga_5779HKX92V*MTYyNzU4NTE5OC4xLjAuMTYyNzU4NTE5OC4w#package_search_integration%60}#package_search_integration) functionality
-* Ease of use with [Dependabot](https://dependabot.com/)
-
 ### Build tools
+
+The command typically used to build the project is:
+
+```shell
+./gradlew clean spotlessApply build
+```
 
 * [Official Gradle documentation](https://docs.gradle.org)
 
