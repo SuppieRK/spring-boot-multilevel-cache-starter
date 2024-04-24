@@ -124,7 +124,7 @@ public class MultiLevelCacheManager implements CacheManager {
     return Collections.unmodifiableSet(availableCaches.keySet());
   }
 
-  /** Expiry policy enabling randomized expiry on writing for local entities */
+  /** Expiry policy enabling randomized expiry for local entities */
   static class RandomizedLocalExpiry implements Expiry<Object, Object> {
 
     private final Duration timeToLive;
