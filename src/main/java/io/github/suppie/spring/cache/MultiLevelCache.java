@@ -146,7 +146,7 @@ public class MultiLevelCache extends RedisCache {
   }
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
-    super.put(key, value);
+    callRedis(() -> super.put(key, value));
   }
 
   // Workarounds for tests
@@ -427,7 +427,7 @@ public class MultiLevelCache extends RedisCache {
   private void callRedis(@NonNull Runnable call) {
     Try.of(
         () -> {
-          cacheCircuitBreaker.decorateRunnable(call);
+          cacheCircuitBreaker.decorateRunnable(call).run();
           return null;
         });
   }
@@ -446,10 +446,12 @@ public class MultiLevelCache extends RedisCache {
   private void sendViaRedis(@Nullable String key) {
     Try.of(
         () -> {
-          cacheCircuitBreaker.decorateRunnable(
-              () ->
-                  redisTemplate.convertAndSend(
-                      properties.getTopic(), new MultiLevelCacheEvictMessage(getName(), key)));
+          cacheCircuitBreaker
+              .decorateRunnable(
+                  () ->
+                      redisTemplate.convertAndSend(
+                          properties.getTopic(), new MultiLevelCacheEvictMessage(getName(), key)))
+              .run();
           return null;
         });
   }
