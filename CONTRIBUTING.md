@@ -55,6 +55,19 @@ The command typically used to build the project is:
 
 * [Testcontainers](https://www.testcontainers.org/)
 
+### Setting up test environment
+
+- You need typical Spring Boot project for testing with Spring Cache / Spring Web for invoking something to trigger the cache.
+- Spin up local Redis instance by using
+```shell
+docker run -d --name redis -p 6379:6379 redis:7.2.4-alpine
+```
+- Spin up Redis Insight dashboard to observe Redis state by using:
+```shell
+docker run -d --name redisinsight -p 5540:5540 redis/redisinsight:latest -v redisinsight:/data
+```
+- Redis Insight woiuld be typically available at http://localhost:5540, your Redis URL to connect would typically have IP of your Docker Machine: look into Redis container network setting by running `docker inspect redis` (typically IP would look like `172.17.0.2` or similar).
+
 ## Code of Conduct
 
 ### Our Pledge
