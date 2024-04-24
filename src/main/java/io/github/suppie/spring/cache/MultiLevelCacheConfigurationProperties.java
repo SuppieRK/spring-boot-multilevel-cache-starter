@@ -79,6 +79,8 @@ public class MultiLevelCacheConfigurationProperties {
 
     /** Percentage of time deviation for local cache entry expiration */
     private int expiryJitter = 50;
+
+    private LocalExpirationMode expirationMode = LocalExpirationMode.AFTER_CREATE;
   }
 
   /**

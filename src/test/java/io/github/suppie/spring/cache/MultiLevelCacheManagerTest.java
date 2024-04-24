@@ -24,7 +24,7 @@
 
 package io.github.suppie.spring.cache;
 
-import io.github.suppie.spring.cache.MultiLevelCacheManager.RandomizedLocalExpiryOnWrite;
+import io.github.suppie.spring.cache.MultiLevelCacheManager.RandomizedLocalExpiry;
 import java.time.Duration;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
@@ -66,7 +66,7 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
 
       Assertions.assertThrows(
           IllegalArgumentException.class,
-          () -> new RandomizedLocalExpiryOnWrite(properties),
+          () -> new RandomizedLocalExpiry(properties),
           "Negative TTL must throw an exception");
     }
 
@@ -78,7 +78,7 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
 
       Assertions.assertThrows(
           IllegalArgumentException.class,
-          () -> new RandomizedLocalExpiryOnWrite(properties),
+          () -> new RandomizedLocalExpiry(properties),
           "Zero TTL must throw an exception");
     }
 
@@ -90,7 +90,7 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
 
       Assertions.assertThrows(
           IllegalArgumentException.class,
-          () -> new RandomizedLocalExpiryOnWrite(properties),
+          () -> new RandomizedLocalExpiry(properties),
           "Negative expiry jitter must throw an exception");
     }
 
@@ -102,7 +102,7 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
 
       Assertions.assertThrows(
           IllegalArgumentException.class,
-          () -> new RandomizedLocalExpiryOnWrite(properties),
+          () -> new RandomizedLocalExpiry(properties),
           "Too big expiry jitter must throw an exception");
     }
   }

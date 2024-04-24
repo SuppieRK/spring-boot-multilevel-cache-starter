@@ -74,6 +74,7 @@ spring:
       local:
         max-size: 2000
         expiry-jitter: 50
+        expiration-mode: after-create
       # Resilience4j Circuit Breaker properties for Redis
       circuit-breaker:
         failure-rate-threshold: 25
