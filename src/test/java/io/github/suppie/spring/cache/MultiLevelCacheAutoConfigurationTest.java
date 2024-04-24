@@ -103,9 +103,40 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
             });
   }
 
+  @ParameterizedTest
+  @MethodSource("localExpirationModes")
+  void instantiationTestWithDifferentLocalExpirationModes(
+      String mode, LocalExpirationMode expected) {
+    ApplicationContextRunner runner =
+        this.runner
+            .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+            .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
+            .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase());
+    if (mode != null) {
+      runner = runner.withPropertyValues("spring.cache.multilevel.local.expiration-mode=" + mode);
+    }
+    runner.run(
+        context -> {
+          MultiLevelCacheManager cacheManager = context.getBean(MultiLevelCacheManager.class);
+          Assertions.assertThat(cacheManager.getProperties().getLocal().getExpirationMode())
+              .isEqualTo(expected);
+        });
+  }
+
   static Stream<Arguments> incorrectCacheTypes() {
     return Arrays.stream(CacheType.values())
         .filter(cacheType -> !CacheType.REDIS.equals(cacheType))
         .map(Arguments::of);
+  }
+
+  static Stream<Arguments> localExpirationModes() {
+    return Stream.of(
+        Arguments.of(null, LocalExpirationMode.AFTER_CREATE),
+        Arguments.of("after-create", LocalExpirationMode.AFTER_CREATE),
+        Arguments.of("AFTER_CREATE", LocalExpirationMode.AFTER_CREATE),
+        Arguments.of("after-update", LocalExpirationMode.AFTER_UPDATE),
+        Arguments.of("AFTER_UPDATE", LocalExpirationMode.AFTER_UPDATE),
+        Arguments.of("after-read", LocalExpirationMode.AFTER_READ),
+        Arguments.of("AFTER_READ", LocalExpirationMode.AFTER_READ));
   }
 }

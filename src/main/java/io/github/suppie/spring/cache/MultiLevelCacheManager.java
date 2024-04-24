@@ -24,6 +24,8 @@
 
 package io.github.suppie.spring.cache;
 
+import static io.github.suppie.spring.cache.MultiLevelCacheConfigurationProperties.*;
+
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -34,6 +36,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
 import org.checkerframework.checker.index.qual.NonNegative;
 import org.checkerframework.checker.nullness.qual.NonNull;
@@ -106,7 +109,7 @@ public class MultiLevelCacheManager implements CacheManager {
                 redisTemplate,
                 Caffeine.newBuilder()
                     .maximumSize(properties.getLocal().getMaxSize())
-                    .expireAfter(new RandomizedLocalExpiryOnWrite(properties))
+                    .expireAfter(new RandomizedLocalExpiry(properties))
                     .build(),
                 circuitBreaker));
   }
@@ -121,18 +124,18 @@ public class MultiLevelCacheManager implements CacheManager {
     return Collections.unmodifiableSet(availableCaches.keySet());
   }
 
-  /** Expiry policy enabling randomized expiry on writing for local entities */
-  static class RandomizedLocalExpiryOnWrite implements Expiry<Object, Object> {
+  /** Expiry policy enabling randomized expiry for local entities */
+  static class RandomizedLocalExpiry implements Expiry<Object, Object> {
 
-    private final Random random;
     private final Duration timeToLive;
     private final double expiryJitter;
+    private final LocalExpirationMode expirationMode;
 
-    public RandomizedLocalExpiryOnWrite(
-        @NonNull MultiLevelCacheConfigurationProperties properties) {
-      this.random = new Random(System.currentTimeMillis());
-      this.timeToLive = properties.getTimeToLive();
-      this.expiryJitter = properties.getLocal().getExpiryJitter();
+    public RandomizedLocalExpiry(@NonNull MultiLevelCacheConfigurationProperties properties) {
+      LocalCacheProperties localProperties = properties.getLocal();
+      this.timeToLive = localProperties.getTimeToLive().orElse(properties.getTimeToLive());
+      this.expiryJitter = localProperties.getExpiryJitter();
+      this.expirationMode = localProperties.getExpirationMode();
 
       if (timeToLive.isNegative()) {
         throw new IllegalArgumentException("Time to live duration must be positive");
@@ -153,11 +156,11 @@ public class MultiLevelCacheManager implements CacheManager {
 
     @Override
     public long expireAfterCreate(@NonNull Object key, @NonNull Object value, long currentTime) {
-      int jitterSign = random.nextBoolean() ? 1 : -1;
-      double randomJitter = 1 + (jitterSign * (expiryJitter / 100) * random.nextDouble());
-      Duration expiry = timeToLive.multipliedBy((long) (100 * randomJitter)).dividedBy(200);
-      log.trace("Key {} will expire in {}", key, expiry);
-      return expiry.toNanos();
+      if (expirationMode == LocalExpirationMode.AFTER_CREATE) {
+        return computeExpiration(key);
+      } else {
+        return Long.MAX_VALUE;
+      }
     }
 
     @Override
@@ -166,7 +169,11 @@ public class MultiLevelCacheManager implements CacheManager {
         @NonNull Object value,
         long currentTime,
         @NonNegative long currentDuration) {
-      return currentDuration;
+      if (expirationMode == LocalExpirationMode.AFTER_UPDATE) {
+        return computeExpiration(key);
+      } else {
+        return currentDuration;
+      }
     }
 
     @Override
@@ -175,7 +182,20 @@ public class MultiLevelCacheManager implements CacheManager {
         @NonNull Object value,
         long currentTime,
         @NonNegative long currentDuration) {
-      return currentDuration;
+      if (expirationMode == LocalExpirationMode.AFTER_READ) {
+        return computeExpiration(key);
+      } else {
+        return currentDuration;
+      }
+    }
+
+    private long computeExpiration(@NonNull Object key) {
+      Random random = ThreadLocalRandom.current();
+      int jitterSign = random.nextBoolean() ? 1 : -1;
+      double randomJitter = 1 + (jitterSign * (expiryJitter / 100) * random.nextDouble());
+      Duration expiry = timeToLive.multipliedBy((long) (100 * randomJitter)).dividedBy(200);
+      log.trace("Key {} will expire in {}", key, expiry);
+      return expiry.toNanos();
     }
   }
 }

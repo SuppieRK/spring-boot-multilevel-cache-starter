@@ -26,6 +26,7 @@ package io.github.suppie.spring.cache;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.SlidingWindowType;
 import java.time.Duration;
+import java.util.Optional;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
@@ -79,6 +80,12 @@ public class MultiLevelCacheConfigurationProperties {
 
     /** Percentage of time deviation for local cache entry expiration */
     private int expiryJitter = 50;
+
+    /** Optional local TTL */
+    private Optional<Duration> timeToLive = Optional.empty();
+
+    /** Defaults to AFTER_CREATE to preserve previous behavior */
+    private LocalExpirationMode expirationMode = LocalExpirationMode.AFTER_CREATE;
   }
 
   /**
