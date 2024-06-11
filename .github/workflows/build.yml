@@ -40,6 +40,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Run FOSSA license check
+        uses: fossas/fossa-action@main # Use a specific version if locking is preferred
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+
       - name: Build with Gradle
         run: ./gradlew spotlessJavaCheck build
 
