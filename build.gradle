@@ -42,8 +42,10 @@ configurations {
     }
 }
 
-ext {
-    set('springCloudVersion', "2023.0.1")
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.2"
+    }
 }
 
 dependencies {
@@ -69,12 +71,6 @@ dependencies {
     testImplementation 'org.awaitility:awaitility'
 
     testImplementation 'org.testcontainers:junit-jupiter'
-}
-
-dependencyManagement {
-    imports {
-        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-    }
 }
 
 test {
