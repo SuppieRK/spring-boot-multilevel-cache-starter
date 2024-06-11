@@ -1,4 +1,6 @@
 # Spring Boot multi-level cache starter
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_shield)
+
 
 Opinionated version of multi-level caching for [Spring Boot](https://spring.io/projects/spring-boot) with [Redis](https://redis.io/) as L2 (remote) cache and [Caffeine](https://github.com/ben-manes/caffeine) as L1 (local) cache with a Circuit Breaker pattern for L2 cache calls.
 
@@ -93,3 +95,7 @@ spring:
 
 - [Circuit Breaker Redis Cache by gee4vee](https://github.com/gee4vee/circuit-breaker-redis-cache)
 - [Multilevel cache Spring Boot starter by pig777](https://github.com/pig-mesh/multilevel-cache-spring-boot-starter)
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_large)
