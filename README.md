@@ -4,6 +4,21 @@ Opinionated version of multi-level caching for [Spring Boot](https://spring.io/p
 
 This version does not allow setting most of the local cache properties in favor of managing local cache expiry by itself.
 
+## Usage
+### Maven
+```xml
+<dependency>
+  <groupId>io.github.suppierk</groupId>
+  <artifactId>spring-boot-multilevel-cache-starter</artifactId>
+  <version>3.3.1.0</version>
+</dependency>
+```
+
+### Gradle
+```groovy
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.3.1.0'
+```
+
 ## Use cases
 
 ### Suitable for
@@ -35,21 +50,6 @@ This version does not allow setting most of the local cache properties in favor 
 30m * (1 ± MAXRNG(0.5)) ->
 30m * RANGE(0.5, 1.5) ->
 15-45m
-```
-
-## Usage
-### Maven
-```xml
-<dependency>
-  <groupId>io.github.suppierk</groupId>
-  <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-  <version>3.3.0.0</version>
-</dependency>
-```
-
-### Gradle
-```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.3.0.0'
 ```
 
 ## Default configuration
