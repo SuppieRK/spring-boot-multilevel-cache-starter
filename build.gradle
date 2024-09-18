@@ -16,7 +16,7 @@ plugins {
     id 'com.vanniktech.maven.publish' version '0.29.0'
 
     // Utility
-//    id 'jacoco'
+    id 'jacoco'
     id 'org.sonarqube' version '4.4.1.3373'
     id 'com.diffplug.spotless' version '6.25.0'
 }
@@ -130,6 +130,22 @@ tasks.withType(Copy).configureEach {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = StandardCharsets.UTF_8.name()
     dependsOn(spotlessJavaCheck)
+}
+
+test {
+    // Report is always generated after tests run
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    // Tests are required to run before generating the report
+    dependsOn test
+
+    reports {
+        html.required = true
+        xml.required = true
+        csv.required = false
+    }
 }
 
 sonar {
