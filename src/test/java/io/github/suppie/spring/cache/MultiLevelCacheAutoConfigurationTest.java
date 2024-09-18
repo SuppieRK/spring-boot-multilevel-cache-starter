@@ -107,15 +107,19 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
   @MethodSource("localExpirationModes")
   void instantiationTestWithDifferentLocalExpirationModes(
       String mode, LocalExpirationMode expected) {
-    ApplicationContextRunner runner =
+    ApplicationContextRunner applicationContextRunner =
         this.runner
             .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
             .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
             .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase());
+
     if (mode != null) {
-      runner = runner.withPropertyValues("spring.cache.multilevel.local.expiration-mode=" + mode);
+      applicationContextRunner =
+          applicationContextRunner.withPropertyValues(
+              "spring.cache.multilevel.local.expiration-mode=" + mode);
     }
-    runner.run(
+
+    applicationContextRunner.run(
         context -> {
           MultiLevelCacheManager cacheManager = context.getBean(MultiLevelCacheManager.class);
           Assertions.assertThat(cacheManager.getProperties().getLocal().getExpirationMode())
