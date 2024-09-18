@@ -4,6 +4,10 @@ Opinionated version of multi-level caching for [Spring Boot](https://spring.io/p
 
 This version does not allow setting most of the local cache properties in favor of managing local cache expiry by itself.
 
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=shield&issueType=license)](https://app.fossa.com/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_shield&issueType=license)
+
+[![SonarCloud](https://sonarcloud.io/images/project_badges/sonarcloud-orange.svg)](https://sonarcloud.io/summary/overall?id=SuppieRK_spring-boot-multilevel-cache-starter)
+
 ## Usage
 ### Maven
 ```xml
