@@ -1,12 +1,13 @@
 # This workflow will build a Java project with Gradle
 # For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-gradle
 
-name: Java CI with Gradle for master branch
+name: Java CI with Gradle for general purposes
 
 on:
   workflow_dispatch: {}
   push:
-    branches: [ master ]
+    branches:
+      - '**'
     paths-ignore:
       - '**.yml'
       - '**.md'
@@ -30,6 +31,13 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/wrapper-validation-action@v3
 
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -37,21 +45,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
           restore-keys: ${{ runner.os }}-gradle
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Run FOSSA license check
-        uses: fossas/fossa-action@main # Use a specific version if locking is preferred
-        with:
-          api-key: ${{ secrets.FOSSA_API_KEY }}
-
-      - name: Build with Gradle
-        run: ./gradlew spotlessJavaCheck build
-
-      - name: Publish to Maven Central
-        run: ./gradlew publishAllPublicationsToMavenCentral --no-configuration-cache
+      - name: Build with Gradle and analyze
+        run: ./gradlew build sonar --info
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_MAVENCENTRALUSERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_MAVENCENTRALPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -17,6 +17,7 @@ plugins {
 
     // Utility
 //    id 'jacoco'
+    id 'org.sonarqube' version '4.4.1.3373'
     id 'com.diffplug.spotless' version '6.25.0'
 }
 
@@ -44,7 +45,7 @@ configurations {
 
 dependencyManagement {
     imports {
-        mavenBom "org.springframework.cloud:spring-cloud-dependencies:2023.0.2"
+        mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2023.0.3'
     }
 }
 
@@ -129,4 +130,12 @@ tasks.withType(Copy).configureEach {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = StandardCharsets.UTF_8.name()
     dependsOn(spotlessJavaCheck)
+}
+
+sonar {
+    properties {
+        property "sonar.projectKey", "SuppieRK_spring-boot-multilevel-cache-starter"
+        property "sonar.organization", "suppierk"
+        property "sonar.host.url", "https://sonarcloud.io"
+    }
 }
