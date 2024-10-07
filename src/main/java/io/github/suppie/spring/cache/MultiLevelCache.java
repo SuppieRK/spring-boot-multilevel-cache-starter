@@ -28,7 +28,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.core.functions.CheckedSupplier;
-import io.github.suppierk.java.util.Try;
+import io.github.suppierk.java.Try;
 import io.github.suppierk.java.util.function.ThrowableSupplier;
 import java.time.Duration;
 import java.util.Objects;
