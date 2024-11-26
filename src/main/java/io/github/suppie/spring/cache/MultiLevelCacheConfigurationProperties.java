@@ -61,9 +61,7 @@ public class MultiLevelCacheConfigurationProperties {
    */
   public RedisCacheConfiguration toRedisCacheConfiguration() {
     RedisCacheConfiguration configuration =
-        RedisCacheConfiguration.defaultCacheConfig()
-            .disableCachingNullValues()
-            .entryTtl(timeToLive);
+        RedisCacheConfiguration.defaultCacheConfig().entryTtl(timeToLive);
 
     if (useKeyPrefix) {
       configuration.prefixCacheNameWith(keyPrefix);
