@@ -41,12 +41,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.cache.Cache;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @ActiveProfiles("test")
 @SpringBootTest(
@@ -61,10 +61,10 @@ class MultiLevelCacheTest {
 
   @Autowired MultiLevelCacheManager cacheManager;
 
-  @MockBean RedisMessageListenerContainer redisMessageListenerContainer;
+  @MockitoBean RedisMessageListenerContainer redisMessageListenerContainer;
 
-  @MockBean RedisConnection redisConnection;
-  @MockBean RedisConnectionFactory redisConnectionFactory;
+  @MockitoBean RedisConnection redisConnection;
+  @MockitoBean RedisConnectionFactory redisConnectionFactory;
 
   @ParameterizedTest
   @MethodSource("operations")
