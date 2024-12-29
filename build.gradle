@@ -138,15 +138,6 @@ tasks.withType(JavaCompile).configureEach {
 	dependsOn(spotlessJavaCheck)
 }
 
-tasks.withType(Copy).configureEach {
-	duplicatesStrategy = DuplicatesStrategy.INCLUDE
-}
-
-tasks.withType(JavaCompile).configureEach {
-	options.encoding = StandardCharsets.UTF_8.name()
-	dependsOn(spotlessJavaCheck)
-}
-
 test {
 	// Report is always generated after tests run
 	finalizedBy jacocoTestReport
