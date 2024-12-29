@@ -1,24 +1,24 @@
 import java.nio.charset.StandardCharsets
 
 plugins {
-    // IDE
-    id 'idea'
+	// IDE
+	id 'idea'
 
-    // Language
-    id 'java'
-    id 'java-library'
+	// Language
+	id 'java'
+	id 'java-library'
 
-    // Core frameworks
-    id 'org.springframework.boot' version '3.4.0'
-    id 'io.spring.dependency-management' version '1.1.6'
+	// Core frameworks
+	id 'org.springframework.boot' version '3.4.1'
+	id 'io.spring.dependency-management' version '1.1.7'
 
-    // Publishing
-    id 'com.vanniktech.maven.publish' version '0.30.0'
+	// Publishing
+	id 'com.vanniktech.maven.publish' version '0.30.0'
 
-    // Utility
-    id 'jacoco'
-    id 'org.sonarqube' version '6.0.1.5171'
-    id 'com.diffplug.spotless' version '6.25.0'
+	// Utility
+	id 'jacoco'
+	id 'org.sonarqube' version '6.0.1.5171'
+	id 'com.diffplug.spotless' version '6.25.0'
 }
 
 // Project properties
@@ -28,130 +28,136 @@ description = "$POM_DESCRIPTION"
 
 // Source code properties
 java {
-    sourceCompatibility = '17'
-    targetCompatibility = '17'
-    compileJava.options.encoding = 'UTF-8'
+	def version = JavaVersion.VERSION_17.toString()
+
+	sourceCompatibility = version
+	targetCompatibility = version
+
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(version)
+	}
 }
 
 repositories {
-    mavenCentral()
+	mavenCentral()
 }
 
 configurations {
-    compileOnly {
-        extendsFrom annotationProcessor
-    }
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
 }
 
 dependencyManagement {
-    imports {
-        mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2024.0.0'
-    }
+	imports {
+		// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
+		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2024.0.0'
+	}
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-cache'
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
-    implementation 'org.springframework.boot:spring-boot-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-cache'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-actuator'
 
-    implementation 'io.micrometer:micrometer-core'
+	implementation 'io.micrometer:micrometer-core'
 
-    implementation 'com.github.ben-manes.caffeine:caffeine'
-    implementation 'io.github.resilience4j:resilience4j-circuitbreaker'
+	implementation 'com.github.ben-manes.caffeine:caffeine'
+	implementation 'io.github.resilience4j:resilience4j-circuitbreaker'
 
-    // For exception handling utilities
-    // See https://github.com/SuppieRK/java-throwable-utils
-    implementation 'io.github.suppierk:java-throwable-utils:2.0.0'
+	// For exception handling utilities
+	// https://mvnrepository.com/artifact/io.github.suppierk/java-throwable-utils
+	implementation 'io.github.suppierk:java-throwable-utils:2.0.0'
 
-    compileOnly 'org.projectlombok:lombok'
+	compileOnly 'org.projectlombok:lombok'
 
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-    annotationProcessor 'org.projectlombok:lombok'
+	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+	annotationProcessor 'org.projectlombok:lombok'
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.awaitility:awaitility'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.awaitility:awaitility'
 
-    testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:junit-jupiter'
 }
 
 test {
-    useJUnitPlatform()
+	useJUnitPlatform()
 }
 
 // Enable Spotless code formatting rules
 spotless {
-    java {
-        googleJavaFormat()
-    }
+	java {
+		target '**/src/*/java/**/*.java'
 
-    lineEndings = 'UNIX'
+		// Aligns with Intellij IDEA default settings
+		toggleOffOn('@formatter:off', '@formatter:on')
+
+		googleJavaFormat()
+	}
+
+	groovyGradle {
+		target '**/*.gradle'
+
+		greclipse()
+	}
 }
 
 // Swap build tasks to build library only
 bootJar {
-    enabled = false
+	enabled = false
 }
 
 jar {
-    enabled = true
-    archiveClassifier.set('')
+	enabled = true
+	archiveClassifier.set('')
 }
 
 task sourceJar(type: Jar, dependsOn: classes) {
-    archiveClassifier.set('sources')
-    from sourceSets.main.allSource
+	archiveClassifier.set('sources')
+	from sourceSets.main.allSource
 }
 
 task javadocJar(type: Jar, dependsOn: javadoc) {
-    archiveClassifier.set('javadoc')
-    from javadoc.destinationDir
+	archiveClassifier.set('javadoc')
+	from javadoc.destinationDir
 }
 
 artifacts {
-    archives jar
-    archives javadocJar
-    archives sourceJar
+	archives jar
+	archives javadocJar
+	archives sourceJar
 }
 
 // Configure several tasks additionally for Gradle
 tasks.withType(Copy).configureEach {
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.encoding = StandardCharsets.UTF_8.name()
-    dependsOn(spotlessJavaCheck)
-}
-
-tasks.withType(Copy).configureEach {
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = StandardCharsets.UTF_8.name()
-    dependsOn(spotlessJavaCheck)
+	options.encoding = StandardCharsets.UTF_8.name()
+	dependsOn(spotlessJavaCheck)
 }
 
 test {
-    // Report is always generated after tests run
-    finalizedBy jacocoTestReport
+	// Report is always generated after tests run
+	finalizedBy jacocoTestReport
 }
 
 jacocoTestReport {
-    // Tests are required to run before generating the report
-    dependsOn test
+	// Tests are required to run before generating the report
+	dependsOn test
 
-    reports {
-        html.required = true
-        xml.required = true
-        csv.required = false
-    }
+	reports {
+		html.required = true
+		xml.required = true
+		csv.required = false
+	}
 }
 
 sonar {
-    properties {
-        property "sonar.projectKey", "SuppieRK_spring-boot-multilevel-cache-starter"
-        property "sonar.organization", "suppierk"
-        property "sonar.host.url", "https://sonarcloud.io"
-    }
+	properties {
+		property "sonar.projectKey", "SuppieRK_spring-boot-multilevel-cache-starter"
+		property "sonar.organization", "suppierk"
+		property "sonar.host.url", "https://sonarcloud.io"
+	}
 }
