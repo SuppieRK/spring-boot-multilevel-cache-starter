@@ -73,7 +73,7 @@ dependencies {
 	// https://ossindex.sonatype.org/vulnerability/CVE-2024-12801?component-type=maven&component-name=ch.qos.logback%2Flogback-core&utm_source=ossindex-client&utm_medium=integration&utm_content=1.7.0
 	// https://ossindex.sonatype.org/vulnerability/CVE-2024-12798?component-type=maven&component-name=ch.qos.logback%2Flogback-core&utm_source=ossindex-client&utm_medium=integration&utm_content=1.7.0
 	// https://mvnrepository.com/artifact/ch.qos.logback/logback-core
-	implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.5.16'
+	implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.5.17'
 	implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.5.16'
 
 	implementation 'io.micrometer:micrometer-core'
