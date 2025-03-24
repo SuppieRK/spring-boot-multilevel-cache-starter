@@ -51,7 +51,7 @@ configurations {
 dependencyManagement {
 	imports {
 		// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
-		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2024.0.0'
+		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2024.0.1'
 	}
 }
 
