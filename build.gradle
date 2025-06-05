@@ -9,7 +9,7 @@ plugins {
 	id 'java-library'
 
 	// Core frameworks
-	id 'org.springframework.boot' version '3.4.5'
+	id 'org.springframework.boot' version '3.5.0'
 	id 'io.spring.dependency-management' version '1.1.7'
 
 	// Publishing
@@ -18,7 +18,7 @@ plugins {
 	// Utility
 	id 'jacoco'
 	id 'org.sonarqube' version '6.2.0.5505'
-	id 'com.diffplug.spotless' version '7.0.3'
+	id 'com.diffplug.spotless' version '7.0.4'
 }
 
 // Project properties
@@ -51,7 +51,7 @@ configurations {
 dependencyManagement {
 	imports {
 		// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
-		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2024.0.1'
+		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.0.0'
 	}
 }
 
@@ -134,12 +134,14 @@ jar {
 	archiveClassifier.set('')
 }
 
-task sourceJar(type: Jar, dependsOn: classes) {
+tasks.register('sourceJar', Jar){
+	dependsOn classes
 	archiveClassifier.set('sources')
 	from sourceSets.main.allSource
 }
 
-task javadocJar(type: Jar, dependsOn: javadoc) {
+tasks.register('javadocJar', Jar){
+	dependsOn javadoc
 	archiveClassifier.set('javadoc')
 	from javadoc.destinationDir
 }

@@ -38,13 +38,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
-import org.checkerframework.checker.index.qual.NonNegative;
-import org.checkerframework.checker.nullness.qual.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.cache.CacheProperties;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.lang.NonNull;
 
 /** Cache manager to cover basic operations */
 @Slf4j
@@ -165,10 +164,11 @@ public class MultiLevelCacheManager implements CacheManager {
 
     @Override
     public long expireAfterUpdate(
-        @NonNull Object key,
-        @NonNull Object value,
-        long currentTime,
-        @NonNegative long currentDuration) {
+        @NonNull Object key, @NonNull Object value, long currentTime, long currentDuration) {
+      if (currentDuration < 0) {
+        throw new IllegalArgumentException("Duration must be non-negative");
+      }
+
       if (expirationMode == LocalExpirationMode.AFTER_UPDATE) {
         return computeExpiration(key);
       } else {
@@ -178,10 +178,11 @@ public class MultiLevelCacheManager implements CacheManager {
 
     @Override
     public long expireAfterRead(
-        @NonNull Object key,
-        @NonNull Object value,
-        long currentTime,
-        @NonNegative long currentDuration) {
+        @NonNull Object key, @NonNull Object value, long currentTime, long currentDuration) {
+      if (currentDuration < 0) {
+        throw new IllegalArgumentException("Duration must be non-negative");
+      }
+
       if (expirationMode == LocalExpirationMode.AFTER_READ) {
         return computeExpiration(key);
       } else {
