@@ -99,7 +99,11 @@ dependencies {
 	}
 	testImplementation 'org.awaitility:awaitility'
 
-	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation('org.testcontainers:junit-jupiter') {
+		exclude group: 'org.apache.commons', module: 'commons-compress'
+	}
+	// https://mvnrepository.com/artifact/org.apache.commons/commons-compress
+	testImplementation 'org.apache.commons:commons-compress:1.27.1'
 }
 
 test {
