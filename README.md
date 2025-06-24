@@ -14,13 +14,13 @@ This version does not allow setting most of the local cache properties in favor 
 <dependency>
   <groupId>io.github.suppierk</groupId>
   <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-  <version>3.5.0.0</version>
+  <version>3.5.3.0</version>
 </dependency>
 ```
 
 ### Gradle
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.5.0.0'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.5.3.0'
 ```
 
 ## Use cases
