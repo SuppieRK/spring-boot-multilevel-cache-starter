@@ -88,7 +88,7 @@ dependencies {
 
 	// For exception handling utilities
 	// https://mvnrepository.com/artifact/io.github.suppierk/java-throwable-utils
-	implementation 'io.github.suppierk:java-throwable-utils:2.0.0'
+	implementation 'io.github.suppierk:java-throwable-utils:2.0.1'
 
 	compileOnly 'org.projectlombok:lombok'
 
