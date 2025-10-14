@@ -10,7 +10,7 @@ plugins {
 
 	// Core frameworks
 	// https://plugins.gradle.org/plugin/org.springframework.boot
-	id 'org.springframework.boot' version '3.5.4'
+	id 'org.springframework.boot' version '3.5.6'
 	// https://plugins.gradle.org/plugin/io.spring.dependency-management
 	id 'io.spring.dependency-management' version '1.1.7'
 
@@ -21,9 +21,9 @@ plugins {
 	// Utility
 	id 'jacoco'
 	// https://plugins.gradle.org/plugin/org.sonarqube
-	id 'org.sonarqube' version '6.2.0.5505'
+	id 'org.sonarqube' version '6.3.1.5724'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
-	id 'com.diffplug.spotless' version '7.2.1'
+	id 'com.diffplug.spotless' version '8.0.0'
 }
 
 // Project properties
@@ -78,8 +78,8 @@ dependencies {
 	// https://ossindex.sonatype.org/vulnerability/CVE-2024-12801?component-type=maven&component-name=ch.qos.logback%2Flogback-core&utm_source=ossindex-client&utm_medium=integration&utm_content=1.7.0
 	// https://ossindex.sonatype.org/vulnerability/CVE-2024-12798?component-type=maven&component-name=ch.qos.logback%2Flogback-core&utm_source=ossindex-client&utm_medium=integration&utm_content=1.7.0
 	// https://mvnrepository.com/artifact/ch.qos.logback/logback-core
-	implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.5.18'
-	implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.5.18'
+	implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.5.19'
+	implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.5.19'
 
 	implementation 'io.micrometer:micrometer-core'
 
@@ -88,7 +88,7 @@ dependencies {
 
 	// For exception handling utilities
 	// https://mvnrepository.com/artifact/io.github.suppierk/java-throwable-utils
-	implementation 'io.github.suppierk:java-throwable-utils:2.0.0'
+	implementation 'io.github.suppierk:java-throwable-utils:2.0.1'
 
 	compileOnly 'org.projectlombok:lombok'
 
