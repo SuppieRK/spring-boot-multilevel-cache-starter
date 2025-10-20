@@ -21,7 +21,7 @@ plugins {
 	// Utility
 	id 'jacoco'
 	// https://plugins.gradle.org/plugin/org.sonarqube
-	id 'org.sonarqube' version '6.3.1.5724'
+	id 'org.sonarqube' version '7.0.0.6105'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
 	id 'com.diffplug.spotless' version '8.0.0'
 }
