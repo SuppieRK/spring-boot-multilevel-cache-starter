@@ -23,7 +23,7 @@ public class ProductService {
   @Cacheable(cacheNames = "products")
   public Product getProduct(String id) {
     int count = loads.incrementAndGet();
-    log.info("Cache miss for id={}, loading entity (load #{})", id, count);
+    log.info("Cache miss for product, loading entity (load #{})", count);
 
     try {
       TimeUnit.MILLISECONDS.sleep(250);
