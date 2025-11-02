@@ -24,6 +24,8 @@ plugins {
 	id 'org.sonarqube' version '7.0.1.6134'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
 	id 'com.diffplug.spotless' version '8.0.0'
+	// https://plugins.gradle.org/plugin/me.champeau.jmh
+	id 'me.champeau.jmh' version '0.7.3'
 }
 
 // Project properties
@@ -193,4 +195,17 @@ sonar {
 		property "sonar.organization", "suppierk"
 		property "sonar.host.url", "https://sonarcloud.io"
 	}
+}
+
+jmh {
+	jvmArgsAppend = ['-Xmx4G']
+	profilers = ['jfr']
+	benchmarkMode = ['avgt']
+	timeUnit = 'ns'
+
+	warmup = '1s'
+	warmupIterations = 2
+
+	timeOnIteration = '1s'
+	iterations = 5
 }

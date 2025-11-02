@@ -200,36 +200,47 @@ public class MultiLevelCache extends RedisCache {
   @Override
   @NonNull
   @SuppressWarnings("unchecked")
-  public synchronized <T> T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
-    Object result = lookup(key);
+  public <T> T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
+    final String localKey = convertKey(key);
+    Object localValue = localCache.getIfPresent(localKey);
 
-    if (result != null) {
-      return (T) result;
+    if (localValue != null) {
+      return (T) localValue;
     }
 
-    final String localKey = convertKey(key);
-    return callRedis(() -> super.get(key, valueLoader))
-        .map(
-            value -> {
-              if (value != null) {
-                localCache.put(localKey, value);
-              }
-              return value;
-            })
-        .orElse(
-            (ThrowableSupplier<T>)
-                () -> {
-                  try {
-                    T value = valueLoader.call();
-                    if (value == null) {
-                      throw new ValueRetrievalException(key, valueLoader, null);
+    final ReentrantLock lock = makeLock(key);
+    lock.lock();
+    try {
+      localValue = localCache.getIfPresent(localKey);
+      if (localValue != null) {
+        return (T) localValue;
+      }
+
+      return callRedis(() -> super.get(key, valueLoader))
+          .map(
+              value -> {
+                if (value != null) {
+                  localCache.put(localKey, value);
+                }
+                return value;
+              })
+          .orElse(
+              (ThrowableSupplier<T>)
+                  () -> {
+                    try {
+                      T value = valueLoader.call();
+                      if (value == null) {
+                        throw new ValueRetrievalException(key, valueLoader, null);
+                      }
+                      localCache.put(localKey, value);
+                      return value;
+                    } catch (Exception recoverException) {
+                      throw new ValueRetrievalException(key, valueLoader, recoverException);
                     }
-                    localCache.put(localKey, value);
-                    return value;
-                  } catch (Exception recoverException) {
-                    throw new ValueRetrievalException(key, valueLoader, recoverException);
-                  }
-                });
+                  });
+    } finally {
+      lock.unlock();
+    }
   }
 
   /**

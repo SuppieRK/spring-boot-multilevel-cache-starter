@@ -29,11 +29,18 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker.State;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.SlidingWindowType;
 import io.github.suppie.spring.cache.MultiLevelCacheConfigurationProperties.CircuitBreakerProperties;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -185,5 +192,60 @@ class MultiLevelCacheTest {
   @FunctionalInterface
   interface TrieConsumer<A, B, C> {
     void accept(A a, B b, C c) throws Throwable;
+  }
+
+  @Test
+  void concurrentGetInvokesLoaderOnce() throws Exception {
+    final String key = "concurrentGetInvokesLoaderOnce";
+    final String expectedValue = key + "-value";
+    final int concurrency = 32;
+
+    MultiLevelCache cache = (MultiLevelCache) cacheManager.getCache(key);
+    Assertions.assertNotNull(cache, "Cache should be automatically created upon request");
+
+    ExecutorService executor = Executors.newFixedThreadPool(concurrency);
+    CountDownLatch ready = new CountDownLatch(concurrency);
+    CountDownLatch start = new CountDownLatch(1);
+    AtomicInteger loaderCalls = new AtomicInteger();
+
+    Callable<String> loader =
+        () -> {
+          loaderCalls.incrementAndGet();
+          TimeUnit.MILLISECONDS.sleep(10);
+          return expectedValue;
+        };
+
+    try {
+      List<Future<String>> futures =
+          Stream.<Callable<String>>generate(
+                  () ->
+                      () -> {
+                        ready.countDown();
+                        start.await(5, TimeUnit.SECONDS);
+                        return cache.get(key, loader);
+                      })
+              .limit(concurrency)
+              .map(executor::submit)
+              .toList();
+
+      ready.await(5, TimeUnit.SECONDS);
+      start.countDown();
+
+      for (Future<String> future : futures) {
+        Assertions.assertEquals(expectedValue, future.get(5, TimeUnit.SECONDS));
+      }
+
+      Assertions.assertEquals(
+          1, loaderCalls.get(), "Loader must be invoked only once for concurrent get requests");
+
+      Assertions.assertEquals(
+          expectedValue,
+          cache.get(key, loader),
+          "Subsequent get requests must return cached value without invoking loader again");
+      Assertions.assertEquals(
+          1, loaderCalls.get(), "Loader must remain invoked only once after cache warmup");
+    } finally {
+      executor.shutdownNow();
+    }
   }
 }
