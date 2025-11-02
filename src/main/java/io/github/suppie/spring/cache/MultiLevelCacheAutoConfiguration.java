@@ -162,10 +162,10 @@ public class MultiLevelCacheAutoConfiguration {
       Duration recommendedMaxDurationInOpenState =
           cacheProperties
               .getTimeToLive()
-              .multipliedBy(cacheProperties.getLocal().getExpiryJitter() - 100L)
+              .multipliedBy(100L - cacheProperties.getLocal().getExpiryJitter())
               .dividedBy(200);
 
-      if (props.getWaitDurationInOpenState().compareTo(recommendedMaxDurationInOpenState) <= 0) {
+      if (props.getWaitDurationInOpenState().compareTo(recommendedMaxDurationInOpenState) > 0) {
         log.warn(
             "Cache circuit breaker wait duration in open state {} is more than recommended value of {}, "
                 + "this can result in local cache expiry while circuit breaker is still in OPEN state.",

@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.stream.Stream;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,8 +37,11 @@ import org.springframework.boot.autoconfigure.cache.CacheType;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.context.annotation.UserConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
+@ExtendWith(OutputCaptureExtension.class)
 class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest {
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
@@ -142,5 +146,22 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
         Arguments.of("AFTER_UPDATE", LocalExpirationMode.AFTER_UPDATE),
         Arguments.of("after-read", LocalExpirationMode.AFTER_READ),
         Arguments.of("AFTER_READ", LocalExpirationMode.AFTER_READ));
+  }
+
+  @Test
+  void circuitBreakerWarnsWhenWaitDurationTooHigh(CapturedOutput output) {
+    runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
+        .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
+        .withPropertyValues("spring.cache.multilevel.time-to-live=10s")
+        .withPropertyValues("spring.cache.multilevel.local.expiry-jitter=80")
+        .withPropertyValues(
+            "spring.cache.multilevel.circuit-breaker.wait-duration-in-open-state=3s")
+        .run(context -> Assertions.assertThat(context).hasSingleBean(MultiLevelCacheManager.class));
+
+    Assertions.assertThat(output)
+        .contains(
+            "Cache circuit breaker wait duration in open state PT3S is more than recommended value of PT1S");
   }
 }
