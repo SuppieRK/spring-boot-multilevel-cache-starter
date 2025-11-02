@@ -195,7 +195,7 @@ public class MultiLevelCacheManager implements CacheManager {
       int jitterSign = random.nextBoolean() ? 1 : -1;
       double randomJitter = 1 + (jitterSign * (expiryJitter / 100) * random.nextDouble());
       Duration expiry = timeToLive.multipliedBy((long) (100 * randomJitter)).dividedBy(200);
-      log.trace("Key {} will expire in {}", key, expiry);
+      log.trace("Key {} will expire from local cache in {}", key, expiry);
       return expiry.toNanos();
     }
   }

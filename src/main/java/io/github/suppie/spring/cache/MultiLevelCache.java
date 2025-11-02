@@ -167,17 +167,27 @@ public class MultiLevelCache extends RedisCache {
     final String localKey = convertKey(key);
     Object localValue = localCache.getIfPresent(localKey);
 
-    if (localValue == null) {
-      return callRedis(() -> super.lookup(key))
-          .map(
-              value -> {
-                localCache.put(localKey, value);
-                return value;
-              })
-          .orElse(() -> null);
+    if (localValue != null) {
+      log.trace("Local cache hit for cache '{}' and key '{}'", getName(), localKey);
+      return localValue;
     }
 
-    return localValue;
+    return callRedis(() -> super.lookup(key))
+        .map(
+            value -> {
+              if (value != null) {
+                log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
+                localCache.put(localKey, value);
+              } else {
+                log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
+              }
+              return value;
+            })
+        .orElse(
+            () -> {
+              log.trace("Redis cache unavailable for cache '{}' and key '{}'", getName(), localKey);
+              return null;
+            });
   }
 
   /**
@@ -205,6 +215,7 @@ public class MultiLevelCache extends RedisCache {
     Object localValue = localCache.getIfPresent(localKey);
 
     if (localValue != null) {
+      log.trace("Local cache hit for cache '{}' and key '{}'", getName(), localKey);
       return (T) localValue;
     }
 
@@ -213,6 +224,7 @@ public class MultiLevelCache extends RedisCache {
     try {
       localValue = localCache.getIfPresent(localKey);
       if (localValue != null) {
+        log.trace("Local cache hit for cache '{}' and key '{}' after wait", getName(), localKey);
         return (T) localValue;
       }
 
@@ -220,7 +232,10 @@ public class MultiLevelCache extends RedisCache {
           .map(
               value -> {
                 if (value != null) {
+                  log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
                   localCache.put(localKey, value);
+                } else {
+                  log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
                 }
                 return value;
               })
@@ -228,10 +243,18 @@ public class MultiLevelCache extends RedisCache {
               (ThrowableSupplier<T>)
                   () -> {
                     try {
+                      log.trace(
+                          "Executing value loader for cache '{}' and key '{}'",
+                          getName(),
+                          localKey);
                       T value = valueLoader.call();
                       if (value == null) {
                         throw new ValueRetrievalException(key, valueLoader, null);
                       }
+                      log.trace(
+                          "Value loader supplied entry for cache '{}' and key '{}'",
+                          getName(),
+                          localKey);
                       localCache.put(localKey, value);
                       return value;
                     } catch (Exception recoverException) {

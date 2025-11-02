@@ -1,60 +1,101 @@
 # Spring Boot multi-level cache starter
 
-Opinionated version of multi-level caching for [Spring Boot](https://spring.io/projects/spring-boot) with [Redis](https://redis.io/) as L2 (remote) cache and [Caffeine](https://github.com/ben-manes/caffeine) as L1 (local) cache with a Circuit Breaker pattern for L2 cache calls.
+Opinionated multi-level caching for [Spring Boot](https://spring.io/projects/spring-boot) that
+combines [Redis](https://redis.io/) for the distributed tier and [Caffeine](https://github.com/ben-manes/caffeine) for
+the in-memory tier, guarded by a Resilience4j circuit breaker.
 
-This version does not allow setting most of the local cache properties in favor of managing local cache expiry by itself.
+### Highlights
 
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=shield&issueType=license)](https://app.fossa.com/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_shield&issueType=license)
+- **Drop-in starter** – activates automatically when `spring.cache.type=redis`
+- **Aggressive hot-path focus** – randomized local TTL keeps Redis warm while preventing stampedes
+- **Graceful degradation** – circuit breaker keeps serving from Caffeine if Redis is slow or down
+- **Batteries included** – curated defaults so you only tweak what matters
 
-[![SonarCloud](https://sonarcloud.io/images/project_badges/sonarcloud-orange.svg)](https://sonarcloud.io/summary/overall?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![Build status](https://github.com/SuppieRK/spring-boot-multilevel-cache-starter/actions/workflows/build.yml/badge.svg)](https://github.com/SuppieRK/spring-boot-multilevel-cache-starter/actions/workflows/build.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.suppierk/spring-boot-multilevel-cache-starter.svg)](https://search.maven.org/artifact/io.github.suppierk/spring-boot-multilevel-cache-starter)
+[![Javadoc](https://javadoc.io/badge2/io.github.suppierk/spring-boot-multilevel-cache-starter/javadoc.svg)](https://javadoc.io/doc/io.github.suppierk/spring-boot-multilevel-cache-starter)
+[![SonarCloud Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![SonarCloud Coverage](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=coverage)](https://sonarcloud.io/summary/new_code?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![SonarCloud Maintainability](https://sonarcloud.io/api/project_badges/measure?project=SuppieRK_spring-boot-multilevel-cache-starter&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=SuppieRK_spring-boot-multilevel-cache-starter)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_shield)
 
 ## Usage
+
 ### Maven
+
 ```xml
+
 <dependency>
-  <groupId>io.github.suppierk</groupId>
-  <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-  <version>3.5.7.0</version>
+    <groupId>io.github.suppierk</groupId>
+    <artifactId>spring-boot-multilevel-cache-starter</artifactId>
+    <version>3.5.7.0</version>
 </dependency>
 ```
 
 ### Gradle
+
 ```groovy
 implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.5.7.0'
 ```
 
+### Examples
+
+- `examples/basic-demo` — minimal REST service demonstrating `@Cacheable` with the starter. Clone the repo, start Redis via `docker compose up -d` inside the example directory, then run `./gradlew :examples:basic-demo:bootRun` from the project root.
+
 ## Use cases
 
 ### Suitable for
+
 - Microservices working with immutable cached entities under low latency requirements
-  - The goal is to not only reduce the number of calls to external service but also reduce the number of calls to Redis
+    - The goal is to not only reduce the number of calls to external service but also reduce the number of calls to
+      Redis
 
 ### Not a good fit for
+
 - Mutable cached entities
 - Entities with short time to live (< 5 minutes)
 - Cases when entities in local cache **must** outlive entities in distributed cache
-  - Consider using only local cache instead
+    - Consider using only local cache instead
 - Cases when all calls to Redis must be synchronized with distributed locks
 
 ## Ideas
 
 - Use well-known Spring primitives for implementation
 - Microservices environment needs to fit the requirement of fault tolerance:
-  - Redis calls covered by [Resilience4j Circuit Breaker](https://resilience4j.readme.io/docs/circuitbreaker) which allows falling back to use local cache at the cost of increased latency and more calls to external services.
-- Redis TTL behaves similar to `expireAfterWrite` in Caffeine which allows us to set randomized expiry time for local cache:
-  - This is useful to ensure that local cache entries will expire earlier for a higher chance to hit Redis instead of performing external call.
-  - This also implicitly reduces the load on the Redis by spreading calls to it over time.
-  - In the case of Redis connection errors, randomized expiry and Circuit Breaker will help to mitigate [thundering herd problem](https://en.wikipedia.org/wiki/Thundering_herd_problem).
+    - Redis calls covered by [Resilience4j Circuit Breaker](https://resilience4j.readme.io/docs/circuitbreaker) which
+      allows falling back to use local cache at the cost of increased latency and more calls to external services.
+- Redis TTL behaves similar to `expireAfterWrite` in Caffeine which allows us to set randomized expiry time for local
+  cache:
+    - This is useful to ensure that local cache entries will expire earlier for a higher chance to hit Redis instead of
+      performing external call.
+    - This also implicitly reduces the load on the Redis by spreading calls to it over time.
+    - In the case of Redis connection errors, randomized expiry and Circuit Breaker will help to
+      mitigate [thundering herd problem](https://en.wikipedia.org/wiki/Thundering_herd_problem).
 - Expiry randomization follows the rule: `(time-to-live / 2) * (1 ± ((expiry-jitter / 100) * RNG(0, 1)))`, for example:
-  - If `spring.cache.multilevel.time-to-live` is `1h`
-  - And `spring.cache.multilevel.local.expiry-jitter` is `50` (percents)
-  - Then entries in local cache will expire in approximately `15-45m`:
+    - If `spring.cache.multilevel.time-to-live` is `1h`
+    - And `spring.cache.multilevel.local.expiry-jitter` is `50` (percents)
+    - Then entries in local cache will expire in approximately `15-45m`:
+
 ```
 (1h / 2) * (1 ± ((50 / 100) * RNG(0, 1))) ->
 30m * (1 ± MAXRNG(0.5)) ->
 30m * RANGE(0.5, 1.5) ->
 15-45m
 ```
+
+## Configuration options
+
+| Property                                        | Default                  | Notes                                                                                               |
+|-------------------------------------------------|--------------------------|-----------------------------------------------------------------------------------------------------|
+| `spring.cache.multilevel.time-to-live`          | `1h`                     | TTL applied to Redis entries; local cache derives its randomized expiry from here unless overridden |
+| `spring.cache.multilevel.use-key-prefix`        | `false`                  | Enables `key-prefix`; set to `true` only when you supply a non-empty prefix                         |
+| `spring.cache.multilevel.key-prefix`            | `""`                     | Optional Redis key prefix                                                                           |
+| `spring.cache.multilevel.topic`                 | `cache:multilevel:topic` | Redis Pub/Sub channel used to broadcast evictions                                                   |
+| `spring.cache.multilevel.local.max-size`        | `2000`                   | Maximum number of entries retained in Caffeine                                                      |
+| `spring.cache.multilevel.local.expiry-jitter`   | `50`                     | Percentage used to randomize the local TTL                                                          |
+| `spring.cache.multilevel.local.expiration-mode` | `after-create`           | One of `after-create`, `after-update`, `after-read`                                                 |
+| `spring.cache.multilevel.local.time-to-live`    | empty                    | Optional dedicated TTL for the local cache                                                          |
+| `spring.cache.multilevel.circuit-breaker.*`     | see YAML                 | Passed directly to Resilience4j’s circuit breaker builder                                           |
 
 ## Default configuration
 
@@ -66,7 +107,7 @@ spring:
       port: ${PORT:6379}
   cache:
     type: redis
-    
+
     # These properties are custom
     multilevel:
       # Redis properties
@@ -98,6 +139,13 @@ spring:
 - [Circuit Breaker Redis Cache by gee4vee](https://github.com/gee4vee/circuit-breaker-redis-cache)
 - [Multilevel cache Spring Boot starter by pig777](https://github.com/pig-mesh/multilevel-cache-spring-boot-starter)
 
+## Contributing
 
-## License
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter.svg?type=large&issueType=license)](https://app.fossa.com/projects/custom%2B20864%2Fgithub.com%2FSuppieRK%2Fspring-boot-multilevel-cache-starter?ref=badge_large&issueType=license)
+Pull requests are welcome. Before submitting, please run:
+
+```bash
+./gradlew spotlessApply check test
+./gradlew jmh
+```
+
+Benchmarks are kept short so you can verify regressions locally without burning an afternoon.
