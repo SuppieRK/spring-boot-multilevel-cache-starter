@@ -28,14 +28,14 @@ the in-memory tier, guarded by a Resilience4j circuit breaker.
 <dependency>
     <groupId>io.github.suppierk</groupId>
     <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-    <version>3.5.7.0</version>
+    <version>3.5.7.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.5.7.0'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:3.5.7.1'
 ```
 
 ### Examples
