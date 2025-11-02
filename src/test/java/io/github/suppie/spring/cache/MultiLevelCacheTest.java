@@ -168,6 +168,17 @@ class MultiLevelCacheTest {
                   Assertions.assertNull(
                       cache.getLocalCache().getIfPresent(key),
                       "Local cache must not contain value when circuit breaker is opened and value loader threw an exception");
+                }),
+        Arguments.of(
+            (TrieConsumer<String, MultiLevelCacheManager, MultiLevelCache>)
+                (key, cacheManager, cache) -> {
+                  Assertions.assertThrows(
+                      Cache.ValueRetrievalException.class,
+                      () -> cache.get(key, () -> null),
+                      "Null value loader result must raise ValueRetrievalException");
+                  Assertions.assertNull(
+                      cache.getLocalCache().getIfPresent(key),
+                      "Local cache must not contain value when value loader returned null");
                 }));
   }
 

@@ -211,7 +211,9 @@ public class MultiLevelCache extends RedisCache {
     return callRedis(() -> super.get(key, valueLoader))
         .map(
             value -> {
-              localCache.put(localKey, value);
+              if (value != null) {
+                localCache.put(localKey, value);
+              }
               return value;
             })
         .orElse(
@@ -219,6 +221,9 @@ public class MultiLevelCache extends RedisCache {
                 () -> {
                   try {
                     T value = valueLoader.call();
+                    if (value == null) {
+                      throw new ValueRetrievalException(key, valueLoader, null);
+                    }
                     localCache.put(localKey, value);
                     return value;
                   } catch (Exception recoverException) {
