@@ -53,6 +53,8 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.util.StringUtils;
 
@@ -82,11 +84,17 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
-      RedisConnectionFactory connectionFactory) {
+      RedisConnectionFactory connectionFactory,
+      ObjectProvider<RedisSerializer<Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
     template.setHashKeySerializer(new StringRedisSerializer());
+    RedisSerializer<Object> valueSerializer =
+        valueSerializerProvider.getIfAvailable(GenericJackson2JsonRedisSerializer::new);
+    template.setValueSerializer(valueSerializer);
+    template.setHashValueSerializer(valueSerializer);
+    template.afterPropertiesSet();
     return template;
   }
 

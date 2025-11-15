@@ -39,7 +39,12 @@ import org.springframework.boot.context.annotation.UserConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 @ExtendWith(OutputCaptureExtension.class)
 class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest {
@@ -181,5 +186,47 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
                   .isNotNull()
                   .hasMessageContaining("spring.cache.multilevel.key-prefix");
             });
+  }
+
+  @Test
+  void redisTemplateUsesJsonValueSerializerByDefault() {
+    runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
+        .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
+        .run(
+            context -> {
+              RedisTemplate<Object, Object> template =
+                  context.getBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME,
+                      RedisTemplate.class);
+              Assertions.assertThat(template.getValueSerializer())
+                  .isInstanceOf(GenericJackson2JsonRedisSerializer.class);
+            });
+  }
+
+  @Test
+  void redisTemplateUsesCustomValueSerializerWhenProvided() {
+    runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
+        .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
+        .withUserConfiguration(CustomSerializerConfiguration.class)
+        .run(
+            context -> {
+              RedisTemplate<Object, Object> template =
+                  context.getBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME,
+                      RedisTemplate.class);
+              Assertions.assertThat(template.getValueSerializer())
+                  .isInstanceOf(StringRedisSerializer.class);
+            });
+  }
+
+  static class CustomSerializerConfiguration {
+    @Bean
+    RedisSerializer<Object> multiLevelCacheValueSerializer() {
+      return (RedisSerializer<Object>) (RedisSerializer<?>) new StringRedisSerializer();
+    }
   }
 }
