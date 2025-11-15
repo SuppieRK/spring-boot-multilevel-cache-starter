@@ -60,7 +60,9 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
   @Qualifier(MultiLevelCacheAutoConfiguration.CIRCUIT_BREAKER_NAME)
   CircuitBreaker circuitBreaker;
 
-  @Autowired RedisTemplate<Object, Object> multiLevelCacheRedisTemplate;
+  @Autowired
+  @Qualifier(MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME)
+  RedisTemplate<Object, Object> multiLevelCacheRedisTemplate;
 
   @Test
   void lookupTest() {

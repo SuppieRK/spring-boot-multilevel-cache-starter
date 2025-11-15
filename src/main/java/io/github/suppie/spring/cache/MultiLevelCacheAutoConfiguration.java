@@ -108,7 +108,8 @@ public class MultiLevelCacheAutoConfiguration {
       ObjectProvider<CacheProperties> highLevelCacheProperties,
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(CIRCUIT_BREAKER_NAME) CircuitBreaker circuitBreaker,
-      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
+          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
     return new MultiLevelCacheManager(
         highLevelCacheProperties, cacheProperties, multiLevelCacheRedisTemplate, circuitBreaker);
   }
@@ -133,7 +134,8 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   public RedisMessageListenerContainer multiLevelCacheRedisMessageListenerContainer(
       MultiLevelCacheConfigurationProperties cacheProperties,
-      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
+      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
+          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
     RedisMessageListenerContainer container = new RedisMessageListenerContainer();
     container.setConnectionFactory(
