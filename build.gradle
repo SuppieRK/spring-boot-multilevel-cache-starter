@@ -99,6 +99,7 @@ dependencies {
 		exclude group: 'ch.qos.logback', module: 'logback-classic'
 	}
 	testImplementation 'org.awaitility:awaitility'
+	testRuntimeOnly 'org.slf4j:slf4j-simple'
 
 	testImplementation('org.testcontainers:junit-jupiter') {
 		exclude group: 'org.apache.commons', module: 'commons-compress'

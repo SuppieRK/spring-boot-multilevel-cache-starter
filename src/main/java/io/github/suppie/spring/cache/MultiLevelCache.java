@@ -487,10 +487,11 @@ public class MultiLevelCache extends RedisCache {
    */
   private void callRedis(@NonNull Runnable call) {
     Try.of(
-        () -> {
-          cacheCircuitBreaker.decorateRunnable(call).run();
-          return null;
-        });
+            () -> {
+              cacheCircuitBreaker.decorateRunnable(call).run();
+              return null;
+            })
+        .ifFailure(throwable -> log.warn("Redis call failed for cache '{}'", getName(), throwable));
   }
 
   /**
@@ -498,7 +499,10 @@ public class MultiLevelCache extends RedisCache {
    * @return execution result as {@link Try}
    */
   private <T> Try<T> callRedis(@NonNull CheckedSupplier<T> call) {
-    return Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
+    Try<T> result = Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
+    result.ifFailure(
+        throwable -> log.warn("Redis call failed for cache '{}'", getName(), throwable));
+    return result;
   }
 
   /**
@@ -506,16 +510,20 @@ public class MultiLevelCache extends RedisCache {
    */
   private void sendViaRedis(@Nullable String key) {
     Try.of(
-        () -> {
-          cacheCircuitBreaker
-              .decorateRunnable(
-                  () ->
-                      redisTemplate.convertAndSend(
-                          properties.getTopic(),
-                          new MultiLevelCacheEvictMessage(getName(), key, instanceId)))
-              .run();
-          return null;
-        });
+            () -> {
+              cacheCircuitBreaker
+                  .decorateRunnable(
+                      () ->
+                          redisTemplate.convertAndSend(
+                              properties.getTopic(),
+                              new MultiLevelCacheEvictMessage(getName(), key, instanceId)))
+                  .run();
+              return null;
+            })
+        .ifFailure(
+            throwable ->
+                log.warn(
+                    "Redis eviction notification failed for cache '{}'", getName(), throwable));
   }
 
   /**
