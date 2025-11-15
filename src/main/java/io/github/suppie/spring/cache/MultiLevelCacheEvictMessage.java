@@ -39,4 +39,5 @@ public class MultiLevelCacheEvictMessage implements Serializable {
 
   private String cacheName;
   private String entryKey;
+  private String senderId;
 }

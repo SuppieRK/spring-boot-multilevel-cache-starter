@@ -220,6 +220,8 @@ public class MultiLevelCacheAutoConfiguration {
 
         if (request == null) return;
 
+        if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
+
         String cacheName = request.getCacheName();
         String entryKey = request.getEntryKey();
 
@@ -231,8 +233,8 @@ public class MultiLevelCacheAutoConfiguration {
 
         log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
 
-        if (entryKey == null) cache.localClear();
-        else cache.localEvict(entryKey);
+        if (entryKey == null) cache.invalidateLocalCache();
+        else cache.invalidateLocalEntry(entryKey);
       } catch (ClassCastException e) {
         log.error(
             "Cannot cast cache instance returned by cache manager to {}",

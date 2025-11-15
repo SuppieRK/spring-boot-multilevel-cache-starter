@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,7 @@ public class MultiLevelCacheManager implements CacheManager {
   private final MultiLevelCacheConfigurationProperties properties;
   private final RedisTemplate<Object, Object> redisTemplate;
   private final CircuitBreaker circuitBreaker;
+  private final String instanceId;
 
   private final Map<String, Cache> availableCaches;
 
@@ -68,6 +70,7 @@ public class MultiLevelCacheManager implements CacheManager {
     this.properties = properties;
     this.redisTemplate = redisTemplate;
     this.circuitBreaker = circuitBreaker;
+    this.instanceId = UUID.randomUUID().toString();
 
     this.availableCaches = new ConcurrentHashMap<>();
 
@@ -82,6 +85,10 @@ public class MultiLevelCacheManager implements CacheManager {
 
   CircuitBreaker getCircuitBreaker() {
     return circuitBreaker;
+  }
+
+  String getInstanceId() {
+    return instanceId;
   }
 
   // Workarounds for tests
@@ -110,7 +117,8 @@ public class MultiLevelCacheManager implements CacheManager {
                     .maximumSize(properties.getLocal().getMaxSize())
                     .expireAfter(new RandomizedLocalExpiry(properties))
                     .build(),
-                circuitBreaker));
+                circuitBreaker,
+                instanceId));
   }
 
   /**

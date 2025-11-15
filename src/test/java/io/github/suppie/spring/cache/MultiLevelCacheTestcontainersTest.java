@@ -24,15 +24,23 @@
 
 package io.github.suppie.spring.cache;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.time.Duration;
+import java.util.Objects;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
+import org.springframework.boot.autoconfigure.cache.CacheProperties;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.Cache;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.listener.ChannelTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.test.context.ActiveProfiles;
 
 @ActiveProfiles("test")
@@ -45,6 +53,14 @@ import org.springframework.test.context.ActiveProfiles;
     })
 class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
   @Autowired MultiLevelCacheManager cacheManager;
+  @Autowired MultiLevelCacheConfigurationProperties cacheProperties;
+  @Autowired ObjectProvider<CacheProperties> cachePropertiesProvider;
+
+  @Autowired
+  @Qualifier(MultiLevelCacheAutoConfiguration.CIRCUIT_BREAKER_NAME)
+  CircuitBreaker circuitBreaker;
+
+  @Autowired RedisTemplate<Object, Object> multiLevelCacheRedisTemplate;
 
   @Test
   void lookupTest() {
@@ -197,6 +213,74 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Assertions.assertDoesNotThrow(() -> cache.clear(), "Method call should not throw an exception");
     Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
     Assertions.assertNull(cache.getLocalCache().getIfPresent(key), "Local cache must evict value");
+  }
+
+  @Test
+  void putBroadcastsInvalidationToOtherInstance() {
+    final String key = "putBroadcastsInvalidationToOtherInstance";
+
+    MultiLevelCache localCache = (MultiLevelCache) cacheManager.getCache(key);
+    Assertions.assertNotNull(localCache, "Cache should be automatically created upon request");
+
+    MultiLevelCacheManager secondaryManager =
+        new MultiLevelCacheManager(
+            cachePropertiesProvider, cacheProperties, multiLevelCacheRedisTemplate, circuitBreaker);
+    MultiLevelCache remoteCache = (MultiLevelCache) secondaryManager.getCache(key);
+    Assertions.assertNotNull(remoteCache, "Secondary cache should be available");
+
+    RedisMessageListenerContainer remoteListener = new RedisMessageListenerContainer();
+    remoteListener.setConnectionFactory(
+        Objects.requireNonNull(multiLevelCacheRedisTemplate.getConnectionFactory()));
+    remoteListener.addMessageListener(
+        (message, pattern) -> {
+          MultiLevelCacheEvictMessage event =
+              (MultiLevelCacheEvictMessage)
+                  multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
+          if (event == null) {
+            return;
+          }
+          if (secondaryManager.getInstanceId().equals(event.getSenderId())) {
+            return;
+          }
+
+          MultiLevelCache cache = (MultiLevelCache) secondaryManager.getCache(event.getCacheName());
+          if (cache == null) {
+            return;
+          }
+
+          if (event.getEntryKey() == null) {
+            cache.invalidateLocalCache();
+          } else {
+            cache.invalidateLocalEntry(event.getEntryKey());
+          }
+        },
+        new ChannelTopic(cacheProperties.getTopic()));
+    remoteListener.afterPropertiesSet();
+    remoteListener.start();
+
+    try {
+      Assertions.assertDoesNotThrow(() -> remoteCache.put(key, "stale"));
+      Awaitility.await()
+          .atMost(Duration.ofSeconds(5))
+          .until(() -> remoteCache.getLocalCache().estimatedSize() > 0);
+
+      String localKey = remoteCache.toLocalKey(key);
+
+      Assertions.assertDoesNotThrow(() -> localCache.put(key, "fresh"));
+
+      Awaitility.await()
+          .atMost(Duration.ofSeconds(10))
+          .until(() -> remoteCache.getLocalCache().getIfPresent(localKey) == null);
+
+      Assertions.assertEquals(
+          "fresh", remoteCache.nativeGet(key), "Remote cache must see an updated value");
+    } finally {
+      remoteListener.stop();
+      try {
+        remoteListener.destroy();
+      } catch (Exception ignored) {
+      }
+    }
   }
 
   @Test
