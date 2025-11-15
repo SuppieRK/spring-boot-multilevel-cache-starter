@@ -31,6 +31,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.util.StringUtils;
 
 /** Simple set of properties to control most aspects of the multi-level cache functionality */
 @Data
@@ -64,6 +65,10 @@ public class MultiLevelCacheConfigurationProperties {
         RedisCacheConfiguration.defaultCacheConfig().entryTtl(timeToLive);
 
     if (useKeyPrefix) {
+      if (!StringUtils.hasText(keyPrefix)) {
+        throw new IllegalStateException(
+            "Property 'spring.cache.multilevel.key-prefix' must be set when 'use-key-prefix' is true");
+      }
       configuration.prefixCacheNameWith(keyPrefix);
     }
 

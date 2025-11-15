@@ -164,4 +164,22 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
         .contains(
             "Cache circuit breaker wait duration in open state PT3S is more than recommended value of PT1S");
   }
+
+  @Test
+  void useKeyPrefixWithoutPrefixFailsFast() {
+    runner
+        .withPropertyValues("spring.data.redis.host=" + System.getProperty("HOST"))
+        .withPropertyValues("spring.data.redis.port=" + System.getProperty("PORT"))
+        .withPropertyValues("spring.cache.type=" + CacheType.REDIS.name().toLowerCase())
+        .withPropertyValues("spring.cache.cache-names=test")
+        .withPropertyValues("spring.cache.multilevel.use-key-prefix=true")
+        .withPropertyValues("spring.cache.multilevel.key-prefix=")
+        .run(
+            context -> {
+              Throwable failure = context.getStartupFailure();
+              Assertions.assertThat(failure)
+                  .isNotNull()
+                  .hasMessageContaining("spring.cache.multilevel.key-prefix");
+            });
+  }
 }
