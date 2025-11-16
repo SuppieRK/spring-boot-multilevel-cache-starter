@@ -144,7 +144,7 @@ class MultiLevelCacheTest {
                       cache.getLocalCache().getIfPresent(key),
                       "Local cache must contain value despite opened circuit breaker");
                   Awaitility.await()
-                      .atMost(cacheManager.getProperties().getTimeToLive())
+                      .atMost(maxLocalTtlWithJitter(cacheManager))
                       .until(() -> cache.getLocalCache().getIfPresent(key) == null);
                 }),
         Arguments.of(
@@ -158,7 +158,7 @@ class MultiLevelCacheTest {
                       cache.getLocalCache().getIfPresent(key),
                       "Local cache must contain value despite opened circuit breaker");
                   Awaitility.await()
-                      .atMost(cacheManager.getProperties().getTimeToLive())
+                      .atMost(maxLocalTtlWithJitter(cacheManager))
                       .until(() -> cache.getLocalCache().getIfPresent(key) == null);
                 }),
         Arguments.of(
@@ -192,6 +192,18 @@ class MultiLevelCacheTest {
   @FunctionalInterface
   interface TrieConsumer<A, B, C> {
     void accept(A a, B b, C c) throws Throwable;
+  }
+
+  private static Duration maxLocalTtlWithJitter(MultiLevelCacheManager cacheManager) {
+    Duration ttl =
+        cacheManager
+            .getProperties()
+            .getLocal()
+            .getTimeToLive()
+            .orElse(cacheManager.getProperties().getTimeToLive());
+    double jitterFraction = cacheManager.getProperties().getLocal().getExpiryJitter() / 100d;
+    long nanos = Math.max(1L, (long) (ttl.toNanos() * (1 + jitterFraction)));
+    return Duration.ofNanos(nanos);
   }
 
   @Test

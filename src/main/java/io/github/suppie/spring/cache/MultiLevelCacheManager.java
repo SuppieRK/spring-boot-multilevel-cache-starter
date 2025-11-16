@@ -200,11 +200,13 @@ public class MultiLevelCacheManager implements CacheManager {
 
     private long computeExpiration(@NonNull Object key) {
       Random random = ThreadLocalRandom.current();
-      int jitterSign = random.nextBoolean() ? 1 : -1;
-      double randomJitter = 1 + (jitterSign * (expiryJitter / 100) * random.nextDouble());
-      Duration expiry = timeToLive.multipliedBy((long) (100 * randomJitter)).dividedBy(200);
+      double jitterFraction = expiryJitter / 100d;
+      double jitter = jitterFraction * random.nextDouble();
+      double multiplier = 1 + (random.nextBoolean() ? jitter : -jitter);
+      long nanos = Math.max(1L, (long) (timeToLive.toNanos() * multiplier));
+      Duration expiry = Duration.ofNanos(nanos);
       log.trace("Key {} will expire from local cache in {}", key, expiry);
-      return expiry.toNanos();
+      return nanos;
     }
   }
 }
