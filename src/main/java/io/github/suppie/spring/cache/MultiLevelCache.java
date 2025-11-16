@@ -500,7 +500,8 @@ public class MultiLevelCache extends RedisCache {
               cacheCircuitBreaker.decorateRunnable(call).run();
               return null;
             })
-        .ifFailure(throwable -> log.warn("Redis call failed for cache '{}'", getName(), throwable));
+        .ifFailure(
+            throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
   }
 
   /**
@@ -510,7 +511,7 @@ public class MultiLevelCache extends RedisCache {
   private <T> Try<T> callRedis(@NonNull CheckedSupplier<T> call) {
     Try<T> result = Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
     result.ifFailure(
-        throwable -> log.warn("Redis call failed for cache '{}'", getName(), throwable));
+        throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
     return result;
   }
 
@@ -531,7 +532,7 @@ public class MultiLevelCache extends RedisCache {
             })
         .ifFailure(
             throwable ->
-                log.warn(
+                log.debug(
                     "Redis eviction notification failed for cache '{}'", getName(), throwable));
   }
 
