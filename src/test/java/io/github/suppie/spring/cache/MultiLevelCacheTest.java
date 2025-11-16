@@ -194,6 +194,26 @@ class MultiLevelCacheTest {
     void accept(A a, B b, C c) throws Throwable;
   }
 
+  @Test
+  void failingLoaderInvokedOnce() {
+    final String key = "failingLoaderInvokedOnce" + COUNTER.incrementAndGet();
+
+    MultiLevelCache cache = (MultiLevelCache) cacheManager.getCache(key);
+    Assertions.assertNotNull(cache, "Cache should be automatically created upon request");
+
+    AtomicInteger loaderCalls = new AtomicInteger();
+    Callable<Object> loader =
+        () -> {
+          loaderCalls.incrementAndGet();
+          throw new IllegalStateException("Test loader failure");
+        };
+
+    Assertions.assertThrows(
+        Cache.ValueRetrievalException.class, () -> cache.get(key, loader), "Loader must fail");
+    Assertions.assertEquals(
+        1, loaderCalls.get(), "Value loader must be invoked only once upon failure");
+  }
+
   private static Duration maxLocalTtlWithJitter(MultiLevelCacheManager cacheManager) {
     Duration ttl =
         cacheManager

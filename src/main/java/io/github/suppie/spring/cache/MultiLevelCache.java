@@ -237,7 +237,16 @@ public class MultiLevelCache extends RedisCache {
         return (T) localValue;
       }
 
-      return callRedis(() -> super.get(key, valueLoader))
+      Try<T> redisResult = callRedis(() -> super.get(key, valueLoader));
+
+      redisResult.ifFailure(
+          failure -> {
+            if (failure instanceof ValueRetrievalException valueRetrievalException) {
+              throw valueRetrievalException;
+            }
+          });
+
+      return redisResult
           .map(
               value -> {
                 if (value != null) {
