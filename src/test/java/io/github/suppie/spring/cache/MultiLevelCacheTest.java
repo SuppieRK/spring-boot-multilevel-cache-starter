@@ -144,7 +144,7 @@ class MultiLevelCacheTest {
                       cache.getLocalCache().getIfPresent(key),
                       "Local cache must contain value despite opened circuit breaker");
                   Awaitility.await()
-                      .atMost(maxLocalTtlWithJitter(cacheManager))
+                      .atMost(cacheManager.getProperties().getTimeToLive())
                       .until(() -> cache.getLocalCache().getIfPresent(key) == null);
                 }),
         Arguments.of(
@@ -158,7 +158,7 @@ class MultiLevelCacheTest {
                       cache.getLocalCache().getIfPresent(key),
                       "Local cache must contain value despite opened circuit breaker");
                   Awaitility.await()
-                      .atMost(maxLocalTtlWithJitter(cacheManager))
+                      .atMost(cacheManager.getProperties().getTimeToLive())
                       .until(() -> cache.getLocalCache().getIfPresent(key) == null);
                 }),
         Arguments.of(
@@ -212,18 +212,6 @@ class MultiLevelCacheTest {
         Cache.ValueRetrievalException.class, () -> cache.get(key, loader), "Loader must fail");
     Assertions.assertEquals(
         1, loaderCalls.get(), "Value loader must be invoked only once upon failure");
-  }
-
-  private static Duration maxLocalTtlWithJitter(MultiLevelCacheManager cacheManager) {
-    Duration ttl =
-        cacheManager
-            .getProperties()
-            .getLocal()
-            .getTimeToLive()
-            .orElse(cacheManager.getProperties().getTimeToLive());
-    double jitterFraction = cacheManager.getProperties().getLocal().getExpiryJitter() / 100d;
-    long nanos = Math.max(1L, (long) (ttl.toNanos() * (1 + jitterFraction)));
-    return Duration.ofNanos(nanos);
   }
 
   @Test

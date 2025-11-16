@@ -140,8 +140,10 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
 
       RandomizedLocalExpiry expiry = new RandomizedLocalExpiry(properties);
       Duration ttl = Duration.ofSeconds(10);
-      long minNanos = (long) (ttl.toNanos() * 0.8d);
-      long maxNanos = (long) (ttl.toNanos() * 1.2d);
+      double baseMultiplier = 0.5d;
+      double jitterFraction = properties.getLocal().getExpiryJitter() / 100d;
+      long minNanos = (long) (ttl.toNanos() * baseMultiplier * (1 - jitterFraction));
+      long maxNanos = (long) (ttl.toNanos() * baseMultiplier * (1 + jitterFraction));
 
       for (int i = 0; i < 100; i++) {
         long computedNanos = expiry.expireAfterCreate("key-" + i, "value", 0);

@@ -198,11 +198,25 @@ public class MultiLevelCacheManager implements CacheManager {
       }
     }
 
+    /**
+     * Calculates expiration for a given key using the documented jitter formula:
+     *
+     * <pre>
+     * (time-to-live / 2) * (1 ± ((expiry-jitter / 100) * RNG(0, 1)))
+     * </pre>
+     *
+     * <p>Floating-point math is used until the final conversion to nanoseconds so the jitter range
+     * is respected and truncation does not collapse values to {@code time-to-live / 2}.
+     *
+     * @param key cache key (only used for logging)
+     * @return expiration duration in nanoseconds
+     */
     private long computeExpiration(@NonNull Object key) {
       Random random = ThreadLocalRandom.current();
       double jitterFraction = expiryJitter / 100d;
       double jitter = jitterFraction * random.nextDouble();
-      double multiplier = 1 + (random.nextBoolean() ? jitter : -jitter);
+      double jitterSigned = random.nextBoolean() ? jitter : -jitter;
+      double multiplier = 0.5d * Math.max(0d, 1 + jitterSigned);
       long nanos = Math.max(1L, (long) (timeToLive.toNanos() * multiplier));
       Duration expiry = Duration.ofNanos(nanos);
       log.trace("Key {} will expire from local cache in {}", key, expiry);
