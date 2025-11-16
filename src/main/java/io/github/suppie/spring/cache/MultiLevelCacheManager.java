@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,7 @@ public class MultiLevelCacheManager implements CacheManager {
   private final MultiLevelCacheConfigurationProperties properties;
   private final RedisTemplate<Object, Object> redisTemplate;
   private final CircuitBreaker circuitBreaker;
+  private final String instanceId;
 
   private final Map<String, Cache> availableCaches;
 
@@ -68,6 +70,7 @@ public class MultiLevelCacheManager implements CacheManager {
     this.properties = properties;
     this.redisTemplate = redisTemplate;
     this.circuitBreaker = circuitBreaker;
+    this.instanceId = UUID.randomUUID().toString();
 
     this.availableCaches = new ConcurrentHashMap<>();
 
@@ -82,6 +85,10 @@ public class MultiLevelCacheManager implements CacheManager {
 
   CircuitBreaker getCircuitBreaker() {
     return circuitBreaker;
+  }
+
+  String getInstanceId() {
+    return instanceId;
   }
 
   // Workarounds for tests
@@ -110,7 +117,8 @@ public class MultiLevelCacheManager implements CacheManager {
                     .maximumSize(properties.getLocal().getMaxSize())
                     .expireAfter(new RandomizedLocalExpiry(properties))
                     .build(),
-                circuitBreaker));
+                circuitBreaker,
+                instanceId));
   }
 
   /**
@@ -190,13 +198,29 @@ public class MultiLevelCacheManager implements CacheManager {
       }
     }
 
+    /**
+     * Calculates expiration for a given key using the documented jitter formula:
+     *
+     * <pre>
+     * (time-to-live / 2) * (1 ± ((expiry-jitter / 100) * RNG(0, 1)))
+     * </pre>
+     *
+     * <p>Floating-point math is used until the final conversion to nanoseconds so the jitter range
+     * is respected and truncation does not collapse values to {@code time-to-live / 2}.
+     *
+     * @param key cache key (only used for logging)
+     * @return expiration duration in nanoseconds
+     */
     private long computeExpiration(@NonNull Object key) {
       Random random = ThreadLocalRandom.current();
-      int jitterSign = random.nextBoolean() ? 1 : -1;
-      double randomJitter = 1 + (jitterSign * (expiryJitter / 100) * random.nextDouble());
-      Duration expiry = timeToLive.multipliedBy((long) (100 * randomJitter)).dividedBy(200);
+      double jitterFraction = expiryJitter / 100d;
+      double jitter = jitterFraction * random.nextDouble();
+      double jitterSigned = random.nextBoolean() ? jitter : -jitter;
+      double multiplier = 0.5d * Math.max(0d, 1 + jitterSigned);
+      long nanos = Math.max(1L, (long) (timeToLive.toNanos() * multiplier));
+      Duration expiry = Duration.ofNanos(nanos);
       log.trace("Key {} will expire from local cache in {}", key, expiry);
-      return expiry.toNanos();
+      return nanos;
     }
   }
 }

@@ -53,6 +53,8 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.util.StringUtils;
 
@@ -82,11 +84,17 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
-      RedisConnectionFactory connectionFactory) {
+      RedisConnectionFactory connectionFactory,
+      ObjectProvider<RedisSerializer<Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
     template.setHashKeySerializer(new StringRedisSerializer());
+    RedisSerializer<Object> valueSerializer =
+        valueSerializerProvider.getIfAvailable(GenericJackson2JsonRedisSerializer::new);
+    template.setValueSerializer(valueSerializer);
+    template.setHashValueSerializer(valueSerializer);
+    template.afterPropertiesSet();
     return template;
   }
 
@@ -100,7 +108,8 @@ public class MultiLevelCacheAutoConfiguration {
       ObjectProvider<CacheProperties> highLevelCacheProperties,
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(CIRCUIT_BREAKER_NAME) CircuitBreaker circuitBreaker,
-      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
+          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
     return new MultiLevelCacheManager(
         highLevelCacheProperties, cacheProperties, multiLevelCacheRedisTemplate, circuitBreaker);
   }
@@ -125,7 +134,8 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   public RedisMessageListenerContainer multiLevelCacheRedisMessageListenerContainer(
       MultiLevelCacheConfigurationProperties cacheProperties,
-      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
+      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
+          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
     RedisMessageListenerContainer container = new RedisMessageListenerContainer();
     container.setConnectionFactory(
@@ -220,6 +230,8 @@ public class MultiLevelCacheAutoConfiguration {
 
         if (request == null) return;
 
+        if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
+
         String cacheName = request.getCacheName();
         String entryKey = request.getEntryKey();
 
@@ -231,8 +243,8 @@ public class MultiLevelCacheAutoConfiguration {
 
         log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
 
-        if (entryKey == null) cache.localClear();
-        else cache.localEvict(entryKey);
+        if (entryKey == null) cache.invalidateLocalCache();
+        else cache.invalidateLocalEntry(entryKey);
       } catch (ClassCastException e) {
         log.error(
             "Cannot cast cache instance returned by cache manager to {}",

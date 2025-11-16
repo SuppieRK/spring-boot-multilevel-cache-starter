@@ -77,6 +77,7 @@ public class MultiLevelCache extends RedisCache {
   protected final CircuitBreaker cacheCircuitBreaker;
 
   private final RedisTemplate<Object, Object> redisTemplate;
+  private final String instanceId;
 
   /**
    * Initializes a new instance of the MultiLevelCache class with the given parameters.
@@ -92,7 +93,8 @@ public class MultiLevelCache extends RedisCache {
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate,
       Cache<Object, Object> localCache,
-      CircuitBreaker cacheCircuitBreaker) {
+      CircuitBreaker cacheCircuitBreaker,
+      String instanceId) {
     this(
         name,
         properties,
@@ -100,7 +102,8 @@ public class MultiLevelCache extends RedisCache {
             Objects.requireNonNull(redisTemplate.getConnectionFactory(), NO_REDIS_CONNECTION)),
         redisTemplate,
         localCache,
-        cacheCircuitBreaker);
+        cacheCircuitBreaker,
+        instanceId);
   }
 
   /**
@@ -119,7 +122,8 @@ public class MultiLevelCache extends RedisCache {
       RedisCacheWriter redisCacheWriter,
       RedisTemplate<Object, Object> redisTemplate,
       Cache<Object, Object> localCache,
-      CircuitBreaker cacheCircuitBreaker) {
+      CircuitBreaker cacheCircuitBreaker,
+      String instanceId) {
     super(name, redisCacheWriter, adjustRedisCacheConfiguration(properties, redisTemplate));
 
     this.properties = properties;
@@ -131,6 +135,7 @@ public class MultiLevelCache extends RedisCache {
             .expireAfterAccess(LOCKS_CACHE_EXPIRE_AFTER_ACCESS)
             .build();
     this.cacheCircuitBreaker = cacheCircuitBreaker;
+    this.instanceId = instanceId;
   }
 
   // Workarounds for tests
@@ -147,6 +152,10 @@ public class MultiLevelCache extends RedisCache {
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
     callRedis(() -> super.put(key, value));
+  }
+
+  String toLocalKey(@NonNull Object key) {
+    return convertKey(key);
   }
 
   // Workarounds for tests
@@ -228,7 +237,16 @@ public class MultiLevelCache extends RedisCache {
         return (T) localValue;
       }
 
-      return callRedis(() -> super.get(key, valueLoader))
+      Try<T> redisResult = callRedis(() -> super.get(key, valueLoader));
+
+      redisResult.ifFailure(
+          failure -> {
+            if (failure instanceof ValueRetrievalException valueRetrievalException) {
+              throw valueRetrievalException;
+            }
+          });
+
+      return redisResult
           .map(
               value -> {
                 if (value != null) {
@@ -256,6 +274,7 @@ public class MultiLevelCache extends RedisCache {
                           getName(),
                           localKey);
                       localCache.put(localKey, value);
+                      sendViaRedis(localKey);
                       return value;
                     } catch (Exception recoverException) {
                       throw new ValueRetrievalException(key, valueLoader, recoverException);
@@ -290,8 +309,10 @@ public class MultiLevelCache extends RedisCache {
       return;
     }
 
-    localCache.put(convertKey(key), value);
+    final String localKey = convertKey(key);
+    localCache.put(localKey, value);
     callRedis(() -> super.put(key, value));
+    sendViaRedis(localKey);
   }
 
   /**
@@ -334,8 +355,10 @@ public class MultiLevelCache extends RedisCache {
 
       Object existingValue = lookup(key);
       if (existingValue == null) {
-        localCache.put(convertKey(key), value);
+        final String localKey = convertKey(key);
+        localCache.put(localKey, value);
         callRedis(() -> super.putIfAbsent(key, value));
+        sendViaRedis(localKey);
         return null;
       } else {
         return new SimpleValueWrapper(existingValue);
@@ -373,6 +396,10 @@ public class MultiLevelCache extends RedisCache {
     localCache.invalidate(localKey);
     callRedis(() -> super.evict(key));
     return localKey;
+  }
+
+  void invalidateLocalEntry(@NonNull String localKey) {
+    localCache.invalidate(localKey);
   }
 
   /**
@@ -427,8 +454,12 @@ public class MultiLevelCache extends RedisCache {
    */
   @SuppressWarnings("squid:S1612")
   void localClear() {
-    localCache.invalidateAll();
+    invalidateLocalCache();
     callRedis(() -> super.clear());
+  }
+
+  void invalidateLocalCache() {
+    localCache.invalidateAll();
   }
 
   /**
@@ -450,7 +481,7 @@ public class MultiLevelCache extends RedisCache {
 
       boolean hadLocalMappings = localCache.estimatedSize() > 0;
 
-      localCache.invalidateAll();
+      invalidateLocalCache();
       callRedis(() -> super.clear());
       sendViaRedis(null);
 
@@ -465,10 +496,12 @@ public class MultiLevelCache extends RedisCache {
    */
   private void callRedis(@NonNull Runnable call) {
     Try.of(
-        () -> {
-          cacheCircuitBreaker.decorateRunnable(call).run();
-          return null;
-        });
+            () -> {
+              cacheCircuitBreaker.decorateRunnable(call).run();
+              return null;
+            })
+        .ifFailure(
+            throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
   }
 
   /**
@@ -476,7 +509,10 @@ public class MultiLevelCache extends RedisCache {
    * @return execution result as {@link Try}
    */
   private <T> Try<T> callRedis(@NonNull CheckedSupplier<T> call) {
-    return Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
+    Try<T> result = Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
+    result.ifFailure(
+        throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
+    return result;
   }
 
   /**
@@ -484,15 +520,20 @@ public class MultiLevelCache extends RedisCache {
    */
   private void sendViaRedis(@Nullable String key) {
     Try.of(
-        () -> {
-          cacheCircuitBreaker
-              .decorateRunnable(
-                  () ->
-                      redisTemplate.convertAndSend(
-                          properties.getTopic(), new MultiLevelCacheEvictMessage(getName(), key)))
-              .run();
-          return null;
-        });
+            () -> {
+              cacheCircuitBreaker
+                  .decorateRunnable(
+                      () ->
+                          redisTemplate.convertAndSend(
+                              properties.getTopic(),
+                              new MultiLevelCacheEvictMessage(getName(), key, instanceId)))
+                  .run();
+              return null;
+            })
+        .ifFailure(
+            throwable ->
+                log.debug(
+                    "Redis eviction notification failed for cache '{}'", getName(), throwable));
   }
 
   /**

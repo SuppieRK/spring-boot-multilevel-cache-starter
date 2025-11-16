@@ -31,6 +31,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.util.StringUtils;
 
 /** Simple set of properties to control most aspects of the multi-level cache functionality */
 @Data
@@ -64,6 +65,10 @@ public class MultiLevelCacheConfigurationProperties {
         RedisCacheConfiguration.defaultCacheConfig().entryTtl(timeToLive);
 
     if (useKeyPrefix) {
+      if (!StringUtils.hasText(keyPrefix)) {
+        throw new IllegalStateException(
+            "Property 'spring.cache.multilevel.key-prefix' must be set when 'use-key-prefix' is true");
+      }
       configuration.prefixCacheNameWith(keyPrefix);
     }
 
@@ -128,21 +133,73 @@ public class MultiLevelCacheConfigurationProperties {
     private SlidingWindowType slidingWindowType = SlidingWindowType.COUNT_BASED;
 
     /** Amount of Redis calls to test if backend is responsive when a circuit breaker closes */
-    private int permittedNumberOfCallsInHalfOpenState =
-        (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos());
+    private Integer permittedNumberOfCallsInHalfOpenState;
 
     /** Amount of time to wait before closing circuit breaker, 0 - wait for all permitted calls. */
-    private Duration maxWaitDurationInHalfOpenState =
-        slowCallDurationThreshold.multipliedBy(permittedNumberOfCallsInHalfOpenState);
+    private Duration maxWaitDurationInHalfOpenState;
 
     /** Sliding window size for Redis calls analysis (calls / seconds) */
-    private int slidingWindowSize = permittedNumberOfCallsInHalfOpenState * 2;
+    private Integer slidingWindowSize;
 
     /** Minimum number of calls which are required before calculating error or slow call rate */
-    private int minimumNumberOfCalls = permittedNumberOfCallsInHalfOpenState / 2;
+    private Integer minimumNumberOfCalls;
 
     /** Time to wait before permitting Redis calls to test backend connectivity. */
-    private Duration waitDurationInOpenState =
-        slowCallDurationThreshold.multipliedBy(minimumNumberOfCalls);
+    private Duration waitDurationInOpenState;
+
+    public int getPermittedNumberOfCallsInHalfOpenState() {
+      if (permittedNumberOfCallsInHalfOpenState == null) {
+        return (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos());
+      }
+      return permittedNumberOfCallsInHalfOpenState;
+    }
+
+    public void setPermittedNumberOfCallsInHalfOpenState(int value) {
+      this.permittedNumberOfCallsInHalfOpenState = value;
+    }
+
+    public Duration getMaxWaitDurationInHalfOpenState() {
+      if (maxWaitDurationInHalfOpenState == null) {
+        return slowCallDurationThreshold.multipliedBy(getPermittedNumberOfCallsInHalfOpenState());
+      }
+      return maxWaitDurationInHalfOpenState;
+    }
+
+    public void setMaxWaitDurationInHalfOpenState(Duration value) {
+      this.maxWaitDurationInHalfOpenState = value;
+    }
+
+    public int getSlidingWindowSize() {
+      if (slidingWindowSize == null) {
+        return getPermittedNumberOfCallsInHalfOpenState() * 2;
+      }
+      return slidingWindowSize;
+    }
+
+    public void setSlidingWindowSize(int value) {
+      this.slidingWindowSize = value;
+    }
+
+    public int getMinimumNumberOfCalls() {
+      if (minimumNumberOfCalls == null) {
+        return Math.max(1, getPermittedNumberOfCallsInHalfOpenState() / 2);
+      }
+      return minimumNumberOfCalls;
+    }
+
+    public void setMinimumNumberOfCalls(int value) {
+      this.minimumNumberOfCalls = value;
+    }
+
+    public Duration getWaitDurationInOpenState() {
+      if (waitDurationInOpenState == null) {
+        return slowCallDurationThreshold.multipliedBy(getMinimumNumberOfCalls());
+      }
+      return waitDurationInOpenState;
+    }
+
+    public void setWaitDurationInOpenState(Duration value) {
+      this.waitDurationInOpenState = value;
+    }
   }
 }

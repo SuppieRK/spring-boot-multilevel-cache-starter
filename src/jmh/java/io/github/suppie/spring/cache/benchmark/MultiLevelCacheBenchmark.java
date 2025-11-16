@@ -73,7 +73,8 @@ public class MultiLevelCacheBenchmark {
                 .maximumSize(properties.getLocal().getMaxSize())
                 .expireAfterWrite(properties.getTimeToLive())
                 .build(),
-            CircuitBreaker.ofDefaults("benchmark"));
+            CircuitBreaker.ofDefaults("benchmark"),
+            "benchmark-instance");
 
     keys = new String[keyCount];
     for (int i = 0; i < keyCount; i++) {

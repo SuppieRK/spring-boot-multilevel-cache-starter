@@ -130,5 +130,27 @@ class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
           () -> new RandomizedLocalExpiry(properties),
           "Zero TTL must throw an exception");
     }
+
+    @Test
+    void expirationWithinConfiguredJitterRange() {
+      MultiLevelCacheConfigurationProperties properties =
+          new MultiLevelCacheConfigurationProperties();
+      properties.setTimeToLive(Duration.ofSeconds(10));
+      properties.getLocal().setExpiryJitter(20);
+
+      RandomizedLocalExpiry expiry = new RandomizedLocalExpiry(properties);
+      Duration ttl = Duration.ofSeconds(10);
+      double baseMultiplier = 0.5d;
+      double jitterFraction = properties.getLocal().getExpiryJitter() / 100d;
+      long minNanos = (long) (ttl.toNanos() * baseMultiplier * (1 - jitterFraction));
+      long maxNanos = (long) (ttl.toNanos() * baseMultiplier * (1 + jitterFraction));
+
+      for (int i = 0; i < 100; i++) {
+        long computedNanos = expiry.expireAfterCreate("key-" + i, "value", 0);
+        Assertions.assertTrue(
+            computedNanos >= minNanos && computedNanos <= maxNanos,
+            "Computed expiration must respect jitter bounds");
+      }
+    }
   }
 }
