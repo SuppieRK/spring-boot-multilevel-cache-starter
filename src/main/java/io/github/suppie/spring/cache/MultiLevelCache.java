@@ -32,6 +32,7 @@ import io.github.suppierk.java.Try;
 import io.github.suppierk.java.util.function.ThrowableSupplier;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.extern.slf4j.Slf4j;
@@ -153,14 +154,12 @@ public class MultiLevelCache extends RedisCache {
     return localCache;
   }
 
-  @Nullable
-  @SuppressWarnings("unchecked")
-  <T> T nativeGet(@NonNull Object key) {
-    return (T) callRedis(() -> super.get(key, () -> null)).get();
+  @Nullable <T> T nativeGet(@NonNull Object key) {
+    return super.get(key, () -> null);
   }
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
-    callRedis(() -> super.put(key, value));
+    super.put(key, value);
   }
 
   String toLocalKey(@NonNull Object key) {
@@ -453,6 +452,7 @@ public class MultiLevelCache extends RedisCache {
   @Override
   public void clear() {
     localClear();
+    clearRedisEntries();
     sendViaRedis(null);
   }
 
@@ -464,7 +464,7 @@ public class MultiLevelCache extends RedisCache {
   @SuppressWarnings("squid:S1612")
   void localClear() {
     invalidateLocalCache();
-    callRedis(() -> super.clear());
+    super.clear();
   }
 
   void invalidateLocalCache() {
@@ -491,7 +491,7 @@ public class MultiLevelCache extends RedisCache {
       boolean hadLocalMappings = localCache.estimatedSize() > 0;
 
       invalidateLocalCache();
-      callRedis(() -> super.clear());
+      clearRedisEntries();
       sendViaRedis(null);
 
       return hadLocalMappings;
@@ -522,6 +522,23 @@ public class MultiLevelCache extends RedisCache {
     result.ifFailure(
         throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
     return result;
+  }
+
+  /** Removes all Redis entries belonging to this cache using a pattern match. */
+  private void clearRedisEntries() {
+    String prefix =
+        getCacheConfiguration().usePrefix()
+            ? getCacheConfiguration().getKeyPrefixFor(getName())
+            : getName() + "::";
+    String pattern = prefix + "*";
+
+    callRedis(
+        () -> {
+          Set<Object> keys = redisTemplate.keys(pattern);
+          if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+          }
+        });
   }
 
   /**
