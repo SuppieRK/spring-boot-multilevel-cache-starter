@@ -26,6 +26,7 @@ package io.github.suppie.spring.cache;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.SlidingWindowType;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -154,10 +155,9 @@ public class MultiLevelCacheConfigurationProperties {
      * @return permitted calls during half-open state
      */
     public int getPermittedNumberOfCallsInHalfOpenState() {
-      if (permittedNumberOfCallsInHalfOpenState == null) {
-        return (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos());
-      }
-      return permittedNumberOfCallsInHalfOpenState;
+      return Objects.requireNonNullElseGet(
+          permittedNumberOfCallsInHalfOpenState,
+          () -> (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos()));
     }
 
     /**

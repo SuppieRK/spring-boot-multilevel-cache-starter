@@ -33,6 +33,7 @@ import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Duration;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -90,12 +91,12 @@ public class MultiLevelCacheAutoConfiguration {
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
       RedisConnectionFactory connectionFactory,
-      ObjectProvider<RedisSerializer<Object>> valueSerializerProvider) {
+      ObjectProvider<@NonNull RedisSerializer<Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
     template.setHashKeySerializer(new StringRedisSerializer());
-    RedisSerializer<Object> valueSerializer =
+    RedisSerializer<@NonNull Object> valueSerializer =
         valueSerializerProvider.getIfAvailable(RedisSerializer::json);
     template.setValueSerializer(valueSerializer);
     template.setHashValueSerializer(valueSerializer);
@@ -112,7 +113,7 @@ public class MultiLevelCacheAutoConfiguration {
    */
   @Bean
   public MultiLevelCacheManager cacheManager(
-      ObjectProvider<CacheProperties> highLevelCacheProperties,
+      ObjectProvider<@NonNull CacheProperties> highLevelCacheProperties,
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(CIRCUIT_BREAKER_NAME) CircuitBreaker circuitBreaker,
       @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
@@ -127,7 +128,8 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   @ConditionalOnBean(MultiLevelCacheManager.class)
   @ConditionalOnClass({MeterBinder.class, CacheMeterBinderProvider.class})
-  public CacheMeterBinderProvider<MultiLevelCache> multiLevelCacheCacheMeterBinderProvider() {
+  public CacheMeterBinderProvider<@NonNull MultiLevelCache>
+      multiLevelCacheCacheMeterBinderProvider() {
     return (cache, tags) ->
         new CaffeineCacheMetrics<>(cache.getLocalCache(), cache.getName(), tags);
   }

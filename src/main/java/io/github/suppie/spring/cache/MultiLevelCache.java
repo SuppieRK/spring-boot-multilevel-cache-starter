@@ -35,6 +35,8 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -42,8 +44,6 @@ import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
 
 /**
  * Multi-level cache implementation
@@ -75,10 +75,10 @@ public class MultiLevelCache extends RedisCache {
   protected final MultiLevelCacheConfigurationProperties properties;
 
   /** Local in-memory cache tier for fast lookups before querying Redis */
-  protected final Cache<Object, Object> localCache;
+  protected final Cache<@NonNull Object, Object> localCache;
 
   /** Per-key lock cache used to synchronize concurrent cache population */
-  protected final Cache<Object, ReentrantLock> locks;
+  protected final Cache<@NonNull Object, ReentrantLock> locks;
 
   /** Circuit breaker protecting Redis operations for fault tolerance */
   protected final CircuitBreaker cacheCircuitBreaker;
@@ -100,7 +100,7 @@ public class MultiLevelCache extends RedisCache {
       String name,
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate,
-      Cache<Object, Object> localCache,
+      Cache<@NonNull Object, Object> localCache,
       CircuitBreaker cacheCircuitBreaker,
       String instanceId) {
     this(
@@ -130,7 +130,7 @@ public class MultiLevelCache extends RedisCache {
       MultiLevelCacheConfigurationProperties properties,
       RedisCacheWriter redisCacheWriter,
       RedisTemplate<Object, Object> redisTemplate,
-      Cache<Object, Object> localCache,
+      Cache<@NonNull Object, Object> localCache,
       CircuitBreaker cacheCircuitBreaker,
       String instanceId) {
     super(name, redisCacheWriter, adjustRedisCacheConfiguration(properties, redisTemplate));

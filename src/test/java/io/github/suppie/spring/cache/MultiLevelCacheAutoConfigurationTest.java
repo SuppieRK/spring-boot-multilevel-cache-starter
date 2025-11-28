@@ -27,6 +27,7 @@ package io.github.suppie.spring.cache;
 import java.util.Arrays;
 import java.util.stream.Stream;
 import org.assertj.core.api.Assertions;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -46,6 +47,7 @@ import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializ
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+@SuppressWarnings("unchecked")
 @ExtendWith(OutputCaptureExtension.class)
 class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest {
   private final ApplicationContextRunner runner =
@@ -225,8 +227,8 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
 
   static class CustomSerializerConfiguration {
     @Bean
-    RedisSerializer<Object> multiLevelCacheValueSerializer() {
-      return (RedisSerializer<Object>) (RedisSerializer<?>) new StringRedisSerializer();
+    RedisSerializer<@NonNull Object> multiLevelCacheValueSerializer() {
+      return (RedisSerializer<@NonNull Object>) (RedisSerializer<?>) new StringRedisSerializer();
     }
   }
 }

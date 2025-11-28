@@ -28,6 +28,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.time.Duration;
 import java.util.Objects;
 import org.awaitility.Awaitility;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -54,7 +55,7 @@ import org.springframework.test.context.ActiveProfiles;
 class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
   @Autowired MultiLevelCacheManager cacheManager;
   @Autowired MultiLevelCacheConfigurationProperties cacheProperties;
-  @Autowired ObjectProvider<CacheProperties> cachePropertiesProvider;
+  @Autowired ObjectProvider<@NonNull CacheProperties> cachePropertiesProvider;
 
   @Autowired
   @Qualifier(MultiLevelCacheAutoConfiguration.CIRCUIT_BREAKER_NAME)
@@ -154,6 +155,7 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Cache.ValueWrapper valueWrapper2 =
         Assertions.assertDoesNotThrow(
             () -> cache.putIfAbsent(key, key), "Entity must be read immediately");
+    Assertions.assertNotNull(valueWrapper2, "Value wrapper must be set");
     Assertions.assertNotNull(valueWrapper2.get(), "Value must be set");
     Assertions.assertEquals(key, cache.nativeGet(key), "Underlying cache must contain value");
     Assertions.assertEquals(
