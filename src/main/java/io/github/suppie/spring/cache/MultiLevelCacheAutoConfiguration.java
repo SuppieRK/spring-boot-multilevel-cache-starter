@@ -33,19 +33,20 @@ import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Duration;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.actuate.metrics.cache.CacheMeterBinderProvider;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
-import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
-import org.springframework.boot.autoconfigure.cache.CacheProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
+import org.springframework.boot.cache.autoconfigure.CacheProperties;
+import org.springframework.boot.cache.metrics.CacheMeterBinderProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.MessageListener;
@@ -53,7 +54,6 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.util.StringUtils;
@@ -61,7 +61,7 @@ import org.springframework.util.StringUtils;
 /** Autoconfiguration properties for this cache */
 @Slf4j
 @Configuration
-@AutoConfigureAfter(RedisAutoConfiguration.class)
+@AutoConfigureAfter(DataRedisAutoConfiguration.class)
 @AutoConfigureBefore(CacheAutoConfiguration.class)
 @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
 @EnableConfigurationProperties({
@@ -70,8 +70,13 @@ import org.springframework.util.StringUtils;
 })
 public class MultiLevelCacheAutoConfiguration {
 
+  /** Bean name for RedisTemplate used by multi-level cache messaging */
   public static final String CACHE_REDIS_TEMPLATE_NAME = "multiLevelCacheRedisTemplate";
+
+  /** Bean name for the circuit breaker guarding Redis cache access */
   public static final String CIRCUIT_BREAKER_NAME = "multiLevelCacheCircuitBreaker";
+
+  /** Named configuration profile for the cache circuit breaker */
   public static final String CIRCUIT_BREAKER_CONFIGURATION_NAME =
       "multiLevelCacheCircuitBreakerConfiguration";
 
@@ -79,19 +84,20 @@ public class MultiLevelCacheAutoConfiguration {
    * Instantiates {@link RedisTemplate} to use for sending {@link MultiLevelCacheEvictMessage}
    *
    * @param connectionFactory to use in template
+   * @param valueSerializerProvider to use in template
    * @return template to send messages about evicted entries
    */
   @Bean
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
       RedisConnectionFactory connectionFactory,
-      ObjectProvider<RedisSerializer<Object>> valueSerializerProvider) {
+      ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
     template.setHashKeySerializer(new StringRedisSerializer());
-    RedisSerializer<Object> valueSerializer =
-        valueSerializerProvider.getIfAvailable(GenericJackson2JsonRedisSerializer::new);
+    RedisSerializer<@NonNull Object> valueSerializer =
+        valueSerializerProvider.getIfAvailable(RedisSerializer::json);
     template.setValueSerializer(valueSerializer);
     template.setHashValueSerializer(valueSerializer);
     template.afterPropertiesSet();
@@ -99,13 +105,15 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * @param highLevelCacheProperties as a baseline
    * @param cacheProperties for multi-level cache
+   * @param circuitBreaker if application defined its own circuit breaker
    * @param multiLevelCacheRedisTemplate to send messages about evicted entries
    * @return cache manager for multi-level caching
    */
   @Bean
   public MultiLevelCacheManager cacheManager(
-      ObjectProvider<CacheProperties> highLevelCacheProperties,
+      ObjectProvider<@NonNull CacheProperties> highLevelCacheProperties,
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(CIRCUIT_BREAKER_NAME) CircuitBreaker circuitBreaker,
       @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
@@ -120,7 +128,8 @@ public class MultiLevelCacheAutoConfiguration {
   @Bean
   @ConditionalOnBean(MultiLevelCacheManager.class)
   @ConditionalOnClass({MeterBinder.class, CacheMeterBinderProvider.class})
-  public CacheMeterBinderProvider<MultiLevelCache> multiLevelCacheCacheMeterBinderProvider() {
+  public CacheMeterBinderProvider<@NonNull MultiLevelCache>
+      multiLevelCacheCacheMeterBinderProvider() {
     return (cache, tags) ->
         new CaffeineCacheMetrics<>(cache.getLocalCache(), cache.getName(), tags);
   }

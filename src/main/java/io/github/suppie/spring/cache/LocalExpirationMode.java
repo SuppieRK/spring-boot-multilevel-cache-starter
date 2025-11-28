@@ -2,6 +2,7 @@ package io.github.suppie.spring.cache;
 
 import com.github.benmanes.caffeine.cache.Expiry;
 
+/** Defines local expiration modes. */
 public enum LocalExpirationMode {
   /** See {@link Expiry#expireAfterCreate(Object, Object, long)} */
   AFTER_CREATE,

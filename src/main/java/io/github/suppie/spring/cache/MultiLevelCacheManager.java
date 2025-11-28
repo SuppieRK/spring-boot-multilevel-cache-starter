@@ -39,12 +39,12 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.cache.CacheProperties;
+import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.lang.NonNull;
 
 /** Cache manager to cover basic operations */
 @Slf4j
@@ -58,8 +58,17 @@ public class MultiLevelCacheManager implements CacheManager {
 
   private final Map<String, Cache> availableCaches;
 
+  /**
+   * Creates a cache manager that produces multi-level caches backed by Redis with a local Caffeine
+   * tier.
+   *
+   * @param highLevelProperties optional Spring cache properties for requested caches
+   * @param properties multi-level cache configuration properties
+   * @param redisTemplate Redis template used for remote cache access and messaging
+   * @param circuitBreaker circuit breaker protecting Redis access
+   */
   public MultiLevelCacheManager(
-      ObjectProvider<CacheProperties> highLevelProperties,
+      ObjectProvider<@NonNull CacheProperties> highLevelProperties,
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate,
       CircuitBreaker circuitBreaker) {
@@ -132,7 +141,7 @@ public class MultiLevelCacheManager implements CacheManager {
   }
 
   /** Expiry policy enabling randomized expiry for local entities */
-  static class RandomizedLocalExpiry implements Expiry<Object, Object> {
+  static class RandomizedLocalExpiry implements Expiry<@NonNull Object, @NonNull Object> {
 
     private final Duration timeToLive;
     private final double expiryJitter;

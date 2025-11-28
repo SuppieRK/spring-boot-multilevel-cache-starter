@@ -32,9 +32,12 @@ import io.github.suppierk.java.Try;
 import io.github.suppierk.java.util.function.ThrowableSupplier;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
@@ -42,8 +45,6 @@ import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
 
 /**
  * Multi-level cache implementation
@@ -71,9 +72,16 @@ public class MultiLevelCache extends RedisCache {
   private static final long LOCKS_CACHE_MAXIMUM_SIZE = 1000;
   private static final Duration LOCKS_CACHE_EXPIRE_AFTER_ACCESS = Duration.ofSeconds(15);
 
+  /** Configuration settings governing TTL, jitter, and other cache behavior */
   protected final MultiLevelCacheConfigurationProperties properties;
-  protected final Cache<Object, Object> localCache;
-  protected final Cache<Object, ReentrantLock> locks;
+
+  /** Local in-memory cache tier for fast lookups before querying Redis */
+  protected final Cache<@NonNull Object, Object> localCache;
+
+  /** Per-key lock cache used to synchronize concurrent cache population */
+  protected final Cache<@NonNull Object, ReentrantLock> locks;
+
+  /** Circuit breaker protecting Redis operations for fault tolerance */
   protected final CircuitBreaker cacheCircuitBreaker;
 
   private final RedisTemplate<Object, Object> redisTemplate;
@@ -87,12 +95,13 @@ public class MultiLevelCache extends RedisCache {
    * @param redisTemplate The Redis template used for accessing the Redis cache.
    * @param localCache The local cache used as an additional level of caching.
    * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   * @param instanceId is current unique service instance identifier
    */
   public MultiLevelCache(
       String name,
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate,
-      Cache<Object, Object> localCache,
+      Cache<@NonNull Object, Object> localCache,
       CircuitBreaker cacheCircuitBreaker,
       String instanceId) {
     this(
@@ -115,13 +124,14 @@ public class MultiLevelCache extends RedisCache {
    * @param redisTemplate The Redis template used for accessing the Redis cache.
    * @param localCache The local cache used as an additional level of caching.
    * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   * @param instanceId is current unique service instance identifier.
    */
   public MultiLevelCache(
       String name,
       MultiLevelCacheConfigurationProperties properties,
       RedisCacheWriter redisCacheWriter,
       RedisTemplate<Object, Object> redisTemplate,
-      Cache<Object, Object> localCache,
+      Cache<@NonNull Object, Object> localCache,
       CircuitBreaker cacheCircuitBreaker,
       String instanceId) {
     super(name, redisCacheWriter, adjustRedisCacheConfiguration(properties, redisTemplate));
@@ -140,18 +150,16 @@ public class MultiLevelCache extends RedisCache {
 
   // Workarounds for tests
 
-  Cache<Object, Object> getLocalCache() {
+  Cache<@NonNull Object, Object> getLocalCache() {
     return localCache;
   }
 
-  @Nullable
-  @SuppressWarnings("unchecked")
-  <T> T nativeGet(@NonNull Object key) {
-    return (T) callRedis(() -> super.get(key, () -> null)).get();
+  @Nullable <T> T nativeGet(@NonNull Object key) {
+    return super.get(key, () -> null);
   }
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
-    callRedis(() -> super.put(key, value));
+    super.put(key, value);
   }
 
   String toLocalKey(@NonNull Object key) {
@@ -444,6 +452,7 @@ public class MultiLevelCache extends RedisCache {
   @Override
   public void clear() {
     localClear();
+    clearRedisEntries();
     sendViaRedis(null);
   }
 
@@ -455,7 +464,7 @@ public class MultiLevelCache extends RedisCache {
   @SuppressWarnings("squid:S1612")
   void localClear() {
     invalidateLocalCache();
-    callRedis(() -> super.clear());
+    super.clear();
   }
 
   void invalidateLocalCache() {
@@ -482,7 +491,7 @@ public class MultiLevelCache extends RedisCache {
       boolean hadLocalMappings = localCache.estimatedSize() > 0;
 
       invalidateLocalCache();
-      callRedis(() -> super.clear());
+      clearRedisEntries();
       sendViaRedis(null);
 
       return hadLocalMappings;
@@ -513,6 +522,23 @@ public class MultiLevelCache extends RedisCache {
     result.ifFailure(
         throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
     return result;
+  }
+
+  /** Removes all Redis entries belonging to this cache using a pattern match. */
+  private void clearRedisEntries() {
+    String prefix =
+        getCacheConfiguration().usePrefix()
+            ? getCacheConfiguration().getKeyPrefixFor(getName())
+            : getName() + "::";
+    String pattern = prefix + "*";
+
+    callRedis(
+        () -> {
+          Set<Object> keys = redisTemplate.keys(pattern);
+          if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+          }
+        });
   }
 
   /**

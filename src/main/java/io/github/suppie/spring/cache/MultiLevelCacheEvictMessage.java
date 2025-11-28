@@ -37,7 +37,12 @@ import lombok.NoArgsConstructor;
 public class MultiLevelCacheEvictMessage implements Serializable {
   @Serial private static final long serialVersionUID = -6839296295008213886L;
 
+  /** Name of the cache affected by this eviction message */
   private String cacheName;
+
+  /** Specific cache entry key to evict; null means evict all local entries */
   private String entryKey;
+
+  /** Unique identifier of the instance that initiated the eviction */
   private String senderId;
 }

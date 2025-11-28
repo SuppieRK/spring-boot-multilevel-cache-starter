@@ -28,14 +28,15 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.time.Duration;
 import java.util.Objects;
 import org.awaitility.Awaitility;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
-import org.springframework.boot.autoconfigure.cache.CacheProperties;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
+import org.springframework.boot.cache.autoconfigure.CacheProperties;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.Cache;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -46,15 +47,21 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("test")
 @SpringBootTest(
     classes = {
-      RedisAutoConfiguration.class,
+      DataRedisAutoConfiguration.class,
       CacheAutoConfiguration.class,
       MultiLevelCacheAutoConfiguration.class,
       MultiLevelCacheManager.class
     })
 class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
+
+  private static final Duration AWAIT_SHORT = Duration.ofSeconds(3);
+  private static final Duration AWAIT_MEDIUM = Duration.ofSeconds(10);
+  private static final Duration AWAIT_LONG = Duration.ofSeconds(20);
+  private static final Duration AWAIT_POLL = Duration.ofMillis(100);
+
   @Autowired MultiLevelCacheManager cacheManager;
   @Autowired MultiLevelCacheConfigurationProperties cacheProperties;
-  @Autowired ObjectProvider<CacheProperties> cachePropertiesProvider;
+  @Autowired ObjectProvider<@NonNull CacheProperties> cachePropertiesProvider;
 
   @Autowired
   @Qualifier(MultiLevelCacheAutoConfiguration.CIRCUIT_BREAKER_NAME)
@@ -88,10 +95,15 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Assertions.assertDoesNotThrow(
         () -> cache.nativePut(key, key),
         "In Redis presence we must be able to load value directly");
-    Assertions.assertNotNull(cache.lookup(key), "Entity was present in Redis");
+    Awaitility.await()
+        .pollInterval(AWAIT_POLL)
+        .atMost(AWAIT_SHORT)
+        .untilAsserted(
+            () -> Assertions.assertNotNull(cache.lookup(key), "Entity was present in Redis"));
 
     Awaitility.await()
-        .atMost(Duration.ofSeconds(2))
+        .pollInterval(AWAIT_POLL)
+        .atMost(AWAIT_SHORT)
         .untilAsserted(
             () -> {
               Assertions.assertEquals(
@@ -154,6 +166,7 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Cache.ValueWrapper valueWrapper2 =
         Assertions.assertDoesNotThrow(
             () -> cache.putIfAbsent(key, key), "Entity must be read immediately");
+    Assertions.assertNotNull(valueWrapper2, "Value wrapper must be set");
     Assertions.assertNotNull(valueWrapper2.get(), "Value must be set");
     Assertions.assertEquals(key, cache.nativeGet(key), "Underlying cache must contain value");
     Assertions.assertEquals(
@@ -165,7 +178,8 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Assertions.assertNull(valueWrapper3, "Value wrapper must be null");
 
     Awaitility.await()
-        .atMost(Duration.ofSeconds(20))
+        .pollInterval(AWAIT_POLL)
+        .atMost(AWAIT_LONG)
         .untilAsserted(
             () -> {
               Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
@@ -263,7 +277,8 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     try {
       Assertions.assertDoesNotThrow(() -> remoteCache.put(key, "stale"));
       Awaitility.await()
-          .atMost(Duration.ofSeconds(5))
+          .pollInterval(AWAIT_POLL)
+          .atMost(AWAIT_MEDIUM)
           .until(() -> remoteCache.getLocalCache().estimatedSize() > 0);
 
       String localKey = remoteCache.toLocalKey(key);
@@ -271,7 +286,8 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
       Assertions.assertDoesNotThrow(() -> localCache.put(key, "fresh"));
 
       Awaitility.await()
-          .atMost(Duration.ofSeconds(10))
+          .pollInterval(AWAIT_POLL)
+          .atMost(AWAIT_MEDIUM)
           .until(() -> remoteCache.getLocalCache().getIfPresent(localKey) == null);
 
       Assertions.assertEquals(
