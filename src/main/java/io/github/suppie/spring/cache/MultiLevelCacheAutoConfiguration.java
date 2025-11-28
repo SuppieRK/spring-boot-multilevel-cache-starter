@@ -91,7 +91,7 @@ public class MultiLevelCacheAutoConfiguration {
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
       RedisConnectionFactory connectionFactory,
-      ObjectProvider<@NonNull RedisSerializer<Object>> valueSerializerProvider) {
+      ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());

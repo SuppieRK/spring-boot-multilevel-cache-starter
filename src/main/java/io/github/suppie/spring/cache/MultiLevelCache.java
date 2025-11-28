@@ -149,7 +149,7 @@ public class MultiLevelCache extends RedisCache {
 
   // Workarounds for tests
 
-  Cache<Object, Object> getLocalCache() {
+  Cache<@NonNull Object, Object> getLocalCache() {
     return localCache;
   }
 
