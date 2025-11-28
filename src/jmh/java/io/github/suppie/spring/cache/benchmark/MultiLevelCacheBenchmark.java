@@ -89,6 +89,7 @@ public class MultiLevelCacheBenchmark {
   }
 
   @Benchmark
+  @SuppressWarnings("unused")
   public void cacheHit(ThreadState threadState, Blackhole blackhole) {
     String key = keys[keyIndex(threadState)];
     Object value = cache.get(key, hitLoader);
@@ -96,6 +97,7 @@ public class MultiLevelCacheBenchmark {
   }
 
   @Benchmark
+  @SuppressWarnings("unused")
   public void cacheMissLoads(Blackhole blackhole) {
     String key = "miss-key-" + missKeyCounter.incrementAndGet();
     Object value = cache.get(key, producingLoader);
@@ -164,7 +166,7 @@ public class MultiLevelCacheBenchmark {
     }
 
     @Override
-    public void remove(String name, byte[] key) {
+    public void evict(String name, byte[] key) {
       ConcurrentMap<Key, byte[]> cache = store.get(name);
       if (cache != null) {
         cache.remove(new Key(key));
@@ -172,7 +174,7 @@ public class MultiLevelCacheBenchmark {
     }
 
     @Override
-    public void clean(String name, byte[] pattern) {
+    public void clear(String name, byte[] pattern) {
       store.remove(name);
     }
 
