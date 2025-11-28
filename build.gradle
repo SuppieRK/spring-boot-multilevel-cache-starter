@@ -21,9 +21,9 @@ plugins {
 	// Utility
 	id 'jacoco'
 	// https://plugins.gradle.org/plugin/org.sonarqube
-	id 'org.sonarqube' version '7.0.1.6134'
+	id 'org.sonarqube' version '7.1.0.6387'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
-	id 'com.diffplug.spotless' version '8.0.0'
+	id 'com.diffplug.spotless' version '8.1.0'
 	// https://plugins.gradle.org/plugin/me.champeau.jmh
 	id 'me.champeau.jmh' version '0.7.3'
 }
@@ -58,26 +58,19 @@ configurations {
 dependencyManagement {
 	imports {
 		// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
-		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.0.0'
+		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.1.0'
+		// https://mvnrepository.com/artifact/org.testcontainers/testcontainers-bom
+		mavenBom 'org.testcontainers:testcontainers-bom:2.0.2'
 	}
 }
 
 dependencies {
-	api('org.springframework.boot:spring-boot-starter-cache') {
-		exclude group: 'ch.qos.logback', module: 'logback-core'
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
-	implementation('org.springframework.boot:spring-boot-starter-data-redis') {
-		exclude group: 'ch.qos.logback', module: 'logback-core'
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
-	implementation('org.springframework.boot:spring-boot-actuator') {
-		exclude group: 'ch.qos.logback', module: 'logback-core'
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
-	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	api 'org.springframework.boot:spring-boot-starter-cache'
+	api 'org.springframework.boot:spring-boot-starter-jackson'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-actuator'
 
-	implementation 'io.micrometer:micrometer-core'
+	api 'io.micrometer:micrometer-core'
 
 	api 'com.github.ben-manes.caffeine:caffeine'
 	api 'io.github.resilience4j:resilience4j-circuitbreaker'
@@ -88,24 +81,12 @@ dependencies {
 
 	compileOnly 'org.projectlombok:lombok'
 
-	annotationProcessor('org.springframework.boot:spring-boot-configuration-processor') {
-		exclude group: 'ch.qos.logback', module: 'logback-core'
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
+	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
 	annotationProcessor 'org.projectlombok:lombok'
 
-	testImplementation('org.springframework.boot:spring-boot-starter-test') {
-		exclude group: 'ch.qos.logback', module: 'logback-core'
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.awaitility:awaitility'
-	testRuntimeOnly 'org.slf4j:slf4j-simple'
-
-	testImplementation('org.testcontainers:junit-jupiter') {
-		exclude group: 'org.apache.commons', module: 'commons-compress'
-	}
-	// https://mvnrepository.com/artifact/org.apache.commons/commons-compress
-	testImplementation 'org.apache.commons:commons-compress:1.28.0'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 }
 
 test {

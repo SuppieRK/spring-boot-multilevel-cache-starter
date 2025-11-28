@@ -75,6 +75,7 @@ public class MultiLevelCacheConfigurationProperties {
     return configuration;
   }
 
+  /** Local cache settings for size limits and expiration strategy */
   @Data
   public static class LocalCacheProperties {
 
@@ -147,6 +148,11 @@ public class MultiLevelCacheConfigurationProperties {
     /** Time to wait before permitting Redis calls to test backend connectivity. */
     private Duration waitDurationInOpenState;
 
+    /**
+     * Number of test calls allowed while breaker is HALF_OPEN
+     *
+     * @return permitted calls during half-open state
+     */
     public int getPermittedNumberOfCallsInHalfOpenState() {
       if (permittedNumberOfCallsInHalfOpenState == null) {
         return (int) (Duration.ofSeconds(5).toNanos() / slowCallDurationThreshold.toNanos());
@@ -154,10 +160,20 @@ public class MultiLevelCacheConfigurationProperties {
       return permittedNumberOfCallsInHalfOpenState;
     }
 
+    /**
+     * Sets how many test calls are allowed while breaker is HALF_OPEN
+     *
+     * @param value permitted call count
+     */
     public void setPermittedNumberOfCallsInHalfOpenState(int value) {
       this.permittedNumberOfCallsInHalfOpenState = value;
     }
 
+    /**
+     * Max time circuit breaker waits in HALF_OPEN before deciding to close or reopen
+     *
+     * @return duration to wait while half-open
+     */
     public Duration getMaxWaitDurationInHalfOpenState() {
       if (maxWaitDurationInHalfOpenState == null) {
         return slowCallDurationThreshold.multipliedBy(getPermittedNumberOfCallsInHalfOpenState());
@@ -165,10 +181,20 @@ public class MultiLevelCacheConfigurationProperties {
       return maxWaitDurationInHalfOpenState;
     }
 
+    /**
+     * Sets maximum wait time in HALF_OPEN before breaker changes state
+     *
+     * @param value wait time while half-open
+     */
     public void setMaxWaitDurationInHalfOpenState(Duration value) {
       this.maxWaitDurationInHalfOpenState = value;
     }
 
+    /**
+     * Sliding window length used to compute failure/slow-call rates
+     *
+     * @return size of the window in calls or seconds depending on window type
+     */
     public int getSlidingWindowSize() {
       if (slidingWindowSize == null) {
         return getPermittedNumberOfCallsInHalfOpenState() * 2;
@@ -176,10 +202,20 @@ public class MultiLevelCacheConfigurationProperties {
       return slidingWindowSize;
     }
 
+    /**
+     * Sets the sliding window size (calls/seconds) for rate calculations
+     *
+     * @param value window size
+     */
     public void setSlidingWindowSize(int value) {
       this.slidingWindowSize = value;
     }
 
+    /**
+     * Minimum number of calls required before error and slow-call rates are calculated
+     *
+     * @return minimum calls to collect before computing rates
+     */
     public int getMinimumNumberOfCalls() {
       if (minimumNumberOfCalls == null) {
         return Math.max(1, getPermittedNumberOfCallsInHalfOpenState() / 2);
@@ -187,10 +223,20 @@ public class MultiLevelCacheConfigurationProperties {
       return minimumNumberOfCalls;
     }
 
+    /**
+     * Sets minimum call count before calculating failure or slow-call rates
+     *
+     * @param value minimum call count
+     */
     public void setMinimumNumberOfCalls(int value) {
       this.minimumNumberOfCalls = value;
     }
 
+    /**
+     * Time interval to wait while breaker is OPEN before allowing test calls
+     *
+     * @return wait duration in open state
+     */
     public Duration getWaitDurationInOpenState() {
       if (waitDurationInOpenState == null) {
         return slowCallDurationThreshold.multipliedBy(getMinimumNumberOfCalls());
@@ -198,6 +244,11 @@ public class MultiLevelCacheConfigurationProperties {
       return waitDurationInOpenState;
     }
 
+    /**
+     * Explicitly sets how long the breaker stays OPEN before permitting test calls
+     *
+     * @param value wait duration in open state
+     */
     public void setWaitDurationInOpenState(Duration value) {
       this.waitDurationInOpenState = value;
     }

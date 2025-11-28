@@ -32,17 +32,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration;
 import org.springframework.boot.autoconfigure.cache.CacheType;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
 import org.springframework.boot.context.annotation.UserConfigurations;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
@@ -53,7 +53,7 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
           .withConfiguration(
               UserConfigurations.of(
                   MultiLevelCacheAutoConfiguration.class,
-                  RedisAutoConfiguration.class,
+                  DataRedisAutoConfiguration.class,
                   CacheAutoConfiguration.class));
 
   @Test
@@ -201,7 +201,7 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
                       MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME,
                       RedisTemplate.class);
               Assertions.assertThat(template.getValueSerializer())
-                  .isInstanceOf(GenericJackson2JsonRedisSerializer.class);
+                  .isInstanceOf(GenericJacksonJsonRedisSerializer.class);
             });
   }
 

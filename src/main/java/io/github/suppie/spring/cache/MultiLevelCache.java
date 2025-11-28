@@ -71,9 +71,16 @@ public class MultiLevelCache extends RedisCache {
   private static final long LOCKS_CACHE_MAXIMUM_SIZE = 1000;
   private static final Duration LOCKS_CACHE_EXPIRE_AFTER_ACCESS = Duration.ofSeconds(15);
 
+  /** Configuration settings governing TTL, jitter, and other cache behavior */
   protected final MultiLevelCacheConfigurationProperties properties;
+
+  /** Local in-memory cache tier for fast lookups before querying Redis */
   protected final Cache<Object, Object> localCache;
+
+  /** Per-key lock cache used to synchronize concurrent cache population */
   protected final Cache<Object, ReentrantLock> locks;
+
+  /** Circuit breaker protecting Redis operations for fault tolerance */
   protected final CircuitBreaker cacheCircuitBreaker;
 
   private final RedisTemplate<Object, Object> redisTemplate;
@@ -87,6 +94,7 @@ public class MultiLevelCache extends RedisCache {
    * @param redisTemplate The Redis template used for accessing the Redis cache.
    * @param localCache The local cache used as an additional level of caching.
    * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   * @param instanceId is current unique service instance identifier
    */
   public MultiLevelCache(
       String name,
@@ -115,6 +123,7 @@ public class MultiLevelCache extends RedisCache {
    * @param redisTemplate The Redis template used for accessing the Redis cache.
    * @param localCache The local cache used as an additional level of caching.
    * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
+   * @param instanceId is current unique service instance identifier.
    */
   public MultiLevelCache(
       String name,

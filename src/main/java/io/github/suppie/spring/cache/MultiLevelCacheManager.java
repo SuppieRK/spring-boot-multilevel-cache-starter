@@ -40,7 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.cache.CacheProperties;
+import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -58,6 +58,15 @@ public class MultiLevelCacheManager implements CacheManager {
 
   private final Map<String, Cache> availableCaches;
 
+  /**
+   * Creates a cache manager that produces multi-level caches backed by Redis with a local Caffeine
+   * tier.
+   *
+   * @param highLevelProperties optional Spring cache properties for requested caches
+   * @param properties multi-level cache configuration properties
+   * @param redisTemplate Redis template used for remote cache access and messaging
+   * @param circuitBreaker circuit breaker protecting Redis access
+   */
   public MultiLevelCacheManager(
       ObjectProvider<CacheProperties> highLevelProperties,
       MultiLevelCacheConfigurationProperties properties,
