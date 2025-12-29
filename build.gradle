@@ -60,7 +60,7 @@ dependencyManagement {
 		// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
 		mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.1.0'
 		// https://mvnrepository.com/artifact/org.testcontainers/testcontainers-bom
-		mavenBom 'org.testcontainers:testcontainers-bom:2.0.2'
+		mavenBom 'org.testcontainers:testcontainers-bom:2.0.3'
 	}
 }
 
