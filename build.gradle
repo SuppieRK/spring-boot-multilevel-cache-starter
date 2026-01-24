@@ -23,7 +23,7 @@ plugins {
 	// https://plugins.gradle.org/plugin/org.sonarqube
 	id 'org.sonarqube' version '7.2.2.6593'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
-	id 'com.diffplug.spotless' version '8.1.0'
+	id 'com.diffplug.spotless' version '8.2.0'
 	// https://plugins.gradle.org/plugin/me.champeau.jmh
 	id 'me.champeau.jmh' version '0.7.3'
 }
