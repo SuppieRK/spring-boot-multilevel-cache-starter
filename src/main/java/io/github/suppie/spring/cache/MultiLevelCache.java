@@ -451,20 +451,9 @@ public class MultiLevelCache extends RedisCache {
    */
   @Override
   public void clear() {
-    localClear();
+    invalidateLocalCache();
     clearRedisEntries();
     sendViaRedis(null);
-  }
-
-  /**
-   * Local copy of {@link #clear()} method for Redis Pub/Sub listener to avoid infinite message loop
-   *
-   * @see #clear()
-   */
-  @SuppressWarnings("squid:S1612")
-  void localClear() {
-    invalidateLocalCache();
-    super.clear();
   }
 
   void invalidateLocalCache() {
