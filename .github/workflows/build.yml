@@ -25,7 +25,7 @@ jobs:
           java-version: 17
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v5
+        uses: gradle/actions/wrapper-validation@v6
 
       - name: Cache SonarCloud packages
         uses: actions/cache@v5
