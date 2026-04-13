@@ -42,4 +42,17 @@ class MultiLevelCacheConfigurationPropertiesTest {
     assertThat(cbp.getMinimumNumberOfCalls()).isEqualTo(4);
     assertThat(cbp.getWaitDurationInOpenState()).isEqualTo(Duration.ofSeconds(9));
   }
+
+  @Test
+  void toRedisCacheConfigurationAppliesConfiguredKeyPrefix() {
+    MultiLevelCacheConfigurationProperties properties =
+        new MultiLevelCacheConfigurationProperties();
+    properties.setUseKeyPrefix(true);
+    properties.setKeyPrefix("ml-");
+
+    var configuration = properties.toRedisCacheConfiguration();
+
+    assertThat(configuration.usePrefix()).isTrue();
+    assertThat(configuration.getKeyPrefixFor("books")).isEqualTo("ml-books::");
+  }
 }
