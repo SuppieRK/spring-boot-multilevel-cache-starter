@@ -70,7 +70,7 @@ public class MultiLevelCacheConfigurationProperties {
         throw new IllegalStateException(
             "Property 'spring.cache.multilevel.key-prefix' must be set when 'use-key-prefix' is true");
       }
-      configuration.prefixCacheNameWith(keyPrefix);
+      configuration = configuration.prefixCacheNameWith(keyPrefix);
     }
 
     return configuration;
