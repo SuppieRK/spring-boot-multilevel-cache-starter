@@ -70,6 +70,13 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
                   .hasBean(MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME);
               Assertions.assertThat(context).hasSingleBean(MultiLevelCacheManager.class);
               Assertions.assertThat(context).hasSingleBean(RedisMessageListenerContainer.class);
+              Assertions.assertThat(context)
+                  .hasBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_INVALIDATION_MESSAGE_LISTENER_NAME);
+              Assertions.assertThat(context)
+                  .hasBean(
+                      MultiLevelCacheAutoConfiguration
+                          .CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME);
             });
   }
 
@@ -89,6 +96,13 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
                   .hasBean(MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME);
               Assertions.assertThat(context).hasSingleBean(MultiLevelCacheManager.class);
               Assertions.assertThat(context).hasSingleBean(RedisMessageListenerContainer.class);
+              Assertions.assertThat(context)
+                  .hasBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_INVALIDATION_MESSAGE_LISTENER_NAME);
+              Assertions.assertThat(context)
+                  .hasBean(
+                      MultiLevelCacheAutoConfiguration
+                          .CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME);
 
               MultiLevelCacheManager cacheManager = context.getBean(MultiLevelCacheManager.class);
               Assertions.assertThat(cacheManager.getCacheNames()).contains(cache1);
@@ -110,7 +124,13 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
               Assertions.assertThat(context)
                   .doesNotHaveBean(MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME);
               Assertions.assertThat(context).doesNotHaveBean(MultiLevelCacheManager.class);
-              Assertions.assertThat(context).doesNotHaveBean(RedisMessageListenerContainer.class);
+              Assertions.assertThat(context)
+                  .doesNotHaveBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_INVALIDATION_MESSAGE_LISTENER_NAME);
+              Assertions.assertThat(context)
+                  .doesNotHaveBean(
+                      MultiLevelCacheAutoConfiguration
+                          .CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME);
             });
   }
 

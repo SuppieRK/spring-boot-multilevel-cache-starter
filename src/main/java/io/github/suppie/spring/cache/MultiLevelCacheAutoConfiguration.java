@@ -31,10 +31,10 @@ import io.github.suppie.spring.cache.MultiLevelCacheConfigurationProperties.Circ
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Duration;
-import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
@@ -47,6 +47,7 @@ import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.boot.cache.metrics.CacheMeterBinderProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
+import org.springframework.boot.data.redis.autoconfigure.RedisMessageListenerContainerConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.MessageListener;
@@ -79,6 +80,18 @@ public class MultiLevelCacheAutoConfiguration {
   /** Named configuration profile for the cache circuit breaker */
   public static final String CIRCUIT_BREAKER_CONFIGURATION_NAME =
       "multiLevelCacheCircuitBreakerConfiguration";
+
+  /** Bean name for the shared Redis message listener container */
+  public static final String REDIS_MESSAGE_LISTENER_CONTAINER_NAME =
+      "redisMessageListenerContainer";
+
+  /** Bean name for the listener that handles multi-level cache invalidation messages */
+  public static final String CACHE_INVALIDATION_MESSAGE_LISTENER_NAME =
+      "multiLevelCacheInvalidationMessageListener";
+
+  /** Bean name for the registrar that attaches the invalidation listener to Redis */
+  public static final String CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME =
+      "multiLevelCacheInvalidationMessageListenerRegistrar";
 
   /**
    * Instantiates {@link RedisTemplate} to use for sending {@link MultiLevelCacheEvictMessage}
@@ -135,24 +148,55 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
-   * @param cacheProperties for multi-level cache
+   * @param redisConnectionFactory to use when a shared listener container is not provided
+   * @param configurerProvider to align the fallback listener container with Spring Boot settings
+   * @return Redis topic listener container to coordinate entry eviction
+   */
+  @Bean(name = REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
+  @ConditionalOnMissingBean(name = REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
+  public RedisMessageListenerContainer redisMessageListenerContainer(
+      RedisConnectionFactory redisConnectionFactory,
+      ObjectProvider<@NonNull RedisMessageListenerContainerConfigurer> configurerProvider) {
+    RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+    RedisMessageListenerContainerConfigurer configurer = configurerProvider.getIfAvailable();
+
+    if (configurer != null) {
+      configurer.configure(container, redisConnectionFactory);
+    } else {
+      container.setConnectionFactory(redisConnectionFactory);
+    }
+
+    return container;
+  }
+
+  /**
    * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
    * @param cacheManager for multi-level caching
-   * @return Redis topic listener to coordinate entry eviction
+   * @return Redis topic listener that handles entry eviction messages
    */
-  @Bean
-  public RedisMessageListenerContainer multiLevelCacheRedisMessageListenerContainer(
-      MultiLevelCacheConfigurationProperties cacheProperties,
+  @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
+  public MessageListener multiLevelCacheInvalidationMessageListener(
       @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
           RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
-    RedisMessageListenerContainer container = new RedisMessageListenerContainer();
-    container.setConnectionFactory(
-        Objects.requireNonNull(multiLevelCacheRedisTemplate.getConnectionFactory()));
-    container.addMessageListener(
-        createMessageListener(multiLevelCacheRedisTemplate, cacheManager),
-        new ChannelTopic(cacheProperties.getTopic()));
-    return container;
+    return createMessageListener(multiLevelCacheRedisTemplate, cacheManager);
+  }
+
+  /**
+   * @param cacheProperties for multi-level cache
+   * @param listenerContainer shared Redis topic listener container
+   * @param messageListener listener that handles entry eviction messages
+   * @return registrar that subscribes the invalidation listener to the configured topic
+   */
+  @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME)
+  public SmartInitializingSingleton multiLevelCacheInvalidationMessageListenerRegistrar(
+      MultiLevelCacheConfigurationProperties cacheProperties,
+      @Qualifier(REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
+          RedisMessageListenerContainer listenerContainer,
+      @Qualifier(CACHE_INVALIDATION_MESSAGE_LISTENER_NAME) MessageListener messageListener) {
+    return () ->
+        listenerContainer.addMessageListener(
+            messageListener, new ChannelTopic(cacheProperties.getTopic()));
   }
 
   /**
