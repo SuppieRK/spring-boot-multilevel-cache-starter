@@ -68,7 +68,8 @@ class MultiLevelCacheTest {
 
   @Autowired MultiLevelCacheManager cacheManager;
 
-  @MockitoBean RedisMessageListenerContainer redisMessageListenerContainer;
+  @MockitoBean(name = MultiLevelCacheAutoConfiguration.REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
+  RedisMessageListenerContainer redisMessageListenerContainer;
 
   @MockitoBean RedisConnection redisConnection;
   @MockitoBean RedisConnectionFactory redisConnectionFactory;
