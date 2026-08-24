@@ -165,12 +165,13 @@ public class MultiLevelCache extends RedisCache {
       log.trace("Redis unavailable for cache '{}' and key '{}'", getName(), localKey);
       return null;
     }
-    if (remote.value() == null) {
+    byte[] remoteBytes = remote.value();
+    if (remoteBytes == null) {
       log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
       return null;
     }
 
-    Object value = deserializeCacheValue(remote.value());
+    Object value = deserializeNonNullCacheValue(remoteBytes);
     if (value == NullValue.INSTANCE) {
       log.debug(
           "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
@@ -292,7 +293,9 @@ public class MultiLevelCache extends RedisCache {
         return null;
       }
 
-      Object existingValue = deserializeCacheValue(remote.value());
+      byte[] existingBytes =
+          Objects.requireNonNull(remote.value(), "Available Redis value must not be null");
+      Object existingValue = deserializeNonNullCacheValue(existingBytes);
       if (existingValue == NullValue.INSTANCE) {
         RemoteCall<Void> removed =
             callRedis(
@@ -306,14 +309,17 @@ public class MultiLevelCache extends RedisCache {
           return null;
         }
         RemoteCall<byte[]> retry = remotePutIfAbsent(redisKey, redisValue, ttl);
-        if (!retry.available() || retry.value() == null) {
+        if (!retry.available()) {
           localCache.put(localKey, value);
-          if (retry.available()) {
-            sendViaRedis(localKey);
-          }
           return null;
         }
-        existingValue = deserializeCacheValue(retry.value());
+        byte[] retryBytes = retry.value();
+        if (retryBytes == null) {
+          localCache.put(localKey, value);
+          sendViaRedis(localKey);
+          return null;
+        }
+        existingValue = deserializeNonNullCacheValue(retryBytes);
         if (existingValue == NullValue.INSTANCE) {
           return null;
         }
@@ -489,6 +495,11 @@ public class MultiLevelCache extends RedisCache {
 
   private byte[] serializeRedisKey(Object key) {
     return serializeCacheKey(createCacheKey(key));
+  }
+
+  private Object deserializeNonNullCacheValue(byte[] value) {
+    return Objects.requireNonNull(
+        deserializeCacheValue(value), "Redis value must not deserialize to null");
   }
 
   private RemoteCall<byte[]> remotePutIfAbsent(byte[] key, byte[] value, Duration ttl) {

@@ -34,6 +34,7 @@ import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -286,40 +287,50 @@ public class MultiLevelCacheAutoConfiguration {
   static MessageListener createMessageListener(
       RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
-    return (message, pattern) -> {
-      try {
-        MultiLevelCacheEvictMessage request;
-        try {
-          request = CacheInvalidationCodec.deserialize(message.getBody());
-        } catch (RuntimeException stableCodecFailure) {
-          Object legacyValue =
-              multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
-          if (!(legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage)) {
-            throw stableCodecFailure;
-          }
-          request = legacyMessage;
-        }
+    return (message, pattern) ->
+        handleInvalidationMessage(message.getBody(), multiLevelCacheRedisTemplate, cacheManager);
+  }
 
-        if (request == null) return;
+  private static void handleInvalidationMessage(
+      byte[] body,
+      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
+      MultiLevelCacheManager cacheManager) {
+    try {
+      MultiLevelCacheEvictMessage request =
+          deserializeInvalidationMessage(body, multiLevelCacheRedisTemplate);
 
-        if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
+      if (request == null) return;
 
-        String cacheName = request.getCacheName();
-        String entryKey = request.getEntryKey();
+      if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
 
-        if (!StringUtils.hasText(cacheName)) return;
+      String cacheName = request.getCacheName();
+      String entryKey = request.getEntryKey();
 
-        MultiLevelCache cache = cacheManager.getExistingCache(cacheName);
+      if (!StringUtils.hasText(cacheName)) return;
 
-        if (cache == null) return;
+      MultiLevelCache cache = cacheManager.getExistingCache(cacheName);
 
-        log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
+      if (cache == null) return;
 
-        if (entryKey == null) cache.invalidateLocalCache();
-        else cache.invalidateLocalEntry(entryKey);
-      } catch (RuntimeException exception) {
-        log.debug("Unknown Redis cache invalidation message", exception);
+      log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
+
+      if (entryKey == null) cache.invalidateLocalCache();
+      else cache.invalidateLocalEntry(entryKey);
+    } catch (RuntimeException exception) {
+      log.debug("Unknown Redis cache invalidation message", exception);
+    }
+  }
+
+  private static @Nullable MultiLevelCacheEvictMessage deserializeInvalidationMessage(
+      byte[] body, RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+    try {
+      return CacheInvalidationCodec.deserialize(body);
+    } catch (RuntimeException stableCodecFailure) {
+      Object legacyValue = multiLevelCacheRedisTemplate.getValueSerializer().deserialize(body);
+      if (legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage) {
+        return legacyMessage;
       }
-    };
+      throw stableCodecFailure;
+    }
   }
 }

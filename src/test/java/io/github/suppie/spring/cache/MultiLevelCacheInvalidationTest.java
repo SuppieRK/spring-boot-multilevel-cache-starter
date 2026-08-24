@@ -146,7 +146,8 @@ class MultiLevelCacheInvalidationTest {
 
   private static RedisTemplate<Object, Object> listenerTemplate() {
     RedisTemplate<Object, Object> template = mock(RedisTemplate.class);
-    when(template.getConnectionFactory()).thenReturn(mock(RedisConnectionFactory.class));
+    RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+    when(template.getConnectionFactory()).thenReturn(connectionFactory);
     doReturn(RedisSerializer.json()).when(template).getValueSerializer();
     return template;
   }
