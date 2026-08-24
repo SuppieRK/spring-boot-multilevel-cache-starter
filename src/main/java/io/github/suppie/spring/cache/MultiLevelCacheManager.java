@@ -40,6 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.cache.Cache;
@@ -138,6 +139,12 @@ public class MultiLevelCacheManager implements CacheManager {
   @Override
   public @NonNull Collection<String> getCacheNames() {
     return Collections.unmodifiableSet(availableCaches.keySet());
+  }
+
+  /** Returns an existing cache without allocating one for an inbound invalidation message. */
+  @Nullable MultiLevelCache getExistingCache(@NonNull String name) {
+    Cache cache = availableCaches.get(name);
+    return cache instanceof MultiLevelCache multiLevelCache ? multiLevelCache : null;
   }
 
   /** Expiry policy enabling randomized expiry for local entities */

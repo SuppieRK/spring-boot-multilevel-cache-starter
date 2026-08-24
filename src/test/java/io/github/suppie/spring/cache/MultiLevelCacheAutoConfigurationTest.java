@@ -33,9 +33,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.cache.CacheType;
 import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
-import org.springframework.boot.context.annotation.UserConfigurations;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -53,7 +53,7 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
           .withConfiguration(
-              UserConfigurations.of(
+              AutoConfigurations.of(
                   MultiLevelCacheAutoConfiguration.class,
                   DataRedisAutoConfiguration.class,
                   CacheAutoConfiguration.class));

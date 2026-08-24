@@ -28,74 +28,60 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.core.functions.CheckedSupplier;
-import io.github.suppierk.java.Try;
-import io.github.suppierk.java.util.function.ThrowableSupplier;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import org.springframework.cache.support.NullValue;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheWriter;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-/**
- * Multi-level cache implementation
- *
- * <p>Main goals are:
- *
- * <ul>
- *   <li>Bypass calls to Redis to speed up retrieval entries
- *   <li>Provide fault tolerance means if Redis is unavailable without loss in functionality
- * </ul>
- *
- * <p>WARNING: When dealing with local cache we do partial key conversion using {@link
- * RedisCache#convertKey(Object)} for consistency and retrieval of correct {@link String}
- */
+/** L1-first cache backed by a shared Redis L2 cache. */
 @Slf4j
 public class MultiLevelCache extends RedisCache {
 
-  // Error messages
   private static final String NO_REDIS_CONNECTION =
       "Redis connection factory was not found for RedisCacheWriter";
   private static final String LOCK_WAS_NOT_INITIALIZED = "Lock was not initialized";
 
-  // These are local non-overridable properties for ReentrantLocks cache to provide atomicity
-  private static final Object CACHE_WIDE_LOCK_OBJECT = new Object();
-  private static final long LOCKS_CACHE_MAXIMUM_SIZE = 1000;
-  private static final Duration LOCKS_CACHE_EXPIRE_AFTER_ACCESS = Duration.ofSeconds(15);
-
-  /** Configuration settings governing TTL, jitter, and other cache behavior */
+  /** Configuration settings governing TTL, jitter, and other cache behavior. */
   protected final MultiLevelCacheConfigurationProperties properties;
 
-  /** Local in-memory cache tier for fast lookups before querying Redis */
+  /** Local in-memory cache tier. */
   protected final Cache<@NonNull Object, Object> localCache;
 
-  /** Per-key lock cache used to synchronize concurrent cache population */
+  /** Weak lock registry; holders and waiters retain strong references while using a lock. */
   protected final Cache<@NonNull Object, ReentrantLock> locks;
 
-  /** Circuit breaker protecting Redis operations for fault tolerance */
+  /** Circuit breaker protecting Redis I/O only. */
   protected final CircuitBreaker cacheCircuitBreaker;
 
+  private final Cache<@NonNull Object, AtomicLong> mutationVersions;
+  private final AtomicLong cacheVersion = new AtomicLong();
+  private final ReentrantLock cacheWideLock = new ReentrantLock();
   private final RedisTemplate<Object, Object> redisTemplate;
   private final String instanceId;
 
   /**
-   * Initializes a new instance of the MultiLevelCache class with the given parameters.
+   * Creates a multi-level cache using a non-locking Redis writer.
    *
-   * @param name The name of the cache.
-   * @param properties The configuration properties for the cache.
-   * @param redisTemplate The Redis template used for accessing the Redis cache.
-   * @param localCache The local cache used as an additional level of caching.
-   * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
-   * @param instanceId is current unique service instance identifier
+   * @param name cache name
+   * @param properties cache properties
+   * @param redisTemplate template used for values and invalidation publication
+   * @param localCache local L1 cache
+   * @param cacheCircuitBreaker Redis circuit breaker
+   * @param instanceId current instance identifier
    */
   public MultiLevelCache(
       String name,
@@ -116,15 +102,15 @@ public class MultiLevelCache extends RedisCache {
   }
 
   /**
-   * Creates a new instance of MultiLevelCache.
+   * Creates a multi-level cache with an explicit Redis writer.
    *
-   * @param name The name of the cache.
-   * @param properties The configuration properties for the cache.
-   * @param redisCacheWriter The Redis cache writer to use.
-   * @param redisTemplate The Redis template used for accessing the Redis cache.
-   * @param localCache The local cache used as an additional level of caching.
-   * @param cacheCircuitBreaker The circuit breaker used for handling cache failures.
-   * @param instanceId is current unique service instance identifier.
+   * @param name cache name
+   * @param properties cache properties
+   * @param redisCacheWriter Redis writer
+   * @param redisTemplate template used for values and invalidation publication
+   * @param localCache local L1 cache
+   * @param cacheCircuitBreaker Redis circuit breaker
+   * @param instanceId current instance identifier
    */
   public MultiLevelCache(
       String name,
@@ -135,27 +121,22 @@ public class MultiLevelCache extends RedisCache {
       CircuitBreaker cacheCircuitBreaker,
       String instanceId) {
     super(name, redisCacheWriter, adjustRedisCacheConfiguration(properties, redisTemplate));
-
-    this.properties = properties;
-    this.redisTemplate = redisTemplate;
-    this.localCache = localCache;
-    this.locks =
-        Caffeine.newBuilder()
-            .maximumSize(LOCKS_CACHE_MAXIMUM_SIZE)
-            .expireAfterAccess(LOCKS_CACHE_EXPIRE_AFTER_ACCESS)
-            .build();
-    this.cacheCircuitBreaker = cacheCircuitBreaker;
-    this.instanceId = instanceId;
+    this.properties = Objects.requireNonNull(properties);
+    this.redisTemplate = Objects.requireNonNull(redisTemplate);
+    this.localCache = Objects.requireNonNull(localCache);
+    this.cacheCircuitBreaker = Objects.requireNonNull(cacheCircuitBreaker);
+    this.instanceId = Objects.requireNonNull(instanceId);
+    this.locks = Caffeine.newBuilder().weakValues().build();
+    this.mutationVersions = Caffeine.newBuilder().weakValues().build();
   }
-
-  // Workarounds for tests
 
   Cache<@NonNull Object, Object> getLocalCache() {
     return localCache;
   }
 
-  @Nullable <T> T nativeGet(@NonNull Object key) {
-    return super.get(key, () -> null);
+  @SuppressWarnings("unchecked")
+  <T> @Nullable T nativeGet(@NonNull Object key) {
+    return (T) fromStoreValue(super.lookup(key));
   }
 
   void nativePut(@NonNull Object key, @Nullable Object value) {
@@ -166,150 +147,87 @@ public class MultiLevelCache extends RedisCache {
     return convertKey(key);
   }
 
-  // Workarounds for tests
-
-  /**
-   * Perform an actual lookup in the underlying store.
-   *
-   * <p>We do not allow storing {@code null} values, if local cache does not have a mapping for
-   * specified key we query Redis using circuit breaker and error handling logic. If Redis contains
-   * requested mapping, the value will be saved in the local cache. If Redis is not available,
-   * {@code null} will be returned.
-   *
-   * @param key the key whose associated value is to be returned
-   * @return the raw store value for the key, or {@code null} if none
-   */
+  /** Returns an L1 value first, consulting Redis only after a local miss. */
   @Override
-  protected Object lookup(@NonNull Object key) {
-    final String localKey = convertKey(key);
+  protected @Nullable Object lookup(@NonNull Object key) {
+    String localKey = convertKey(key);
     Object localValue = localCache.getIfPresent(localKey);
-
     if (localValue != null) {
       log.trace("Local cache hit for cache '{}' and key '{}'", getName(), localKey);
       return localValue;
     }
 
-    return callRedis(() -> super.lookup(key))
-        .map(
-            value -> {
-              if (value != null) {
-                log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
-                localCache.put(localKey, value);
-              } else {
-                log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
-              }
-              return value;
-            })
-        .orElse(
-            () -> {
-              log.trace("Redis cache unavailable for cache '{}' and key '{}'", getName(), localKey);
-              return null;
-            });
+    VersionStamp stamp = captureVersion(localKey);
+    byte[] redisKey = serializeRedisKey(key);
+    RemoteCall<byte[]> remote = callRedis(() -> getCacheWriter().get(getName(), redisKey), "read");
+    if (!remote.available()) {
+      log.trace("Redis unavailable for cache '{}' and key '{}'", getName(), localKey);
+      return null;
+    }
+    if (remote.value() == null) {
+      log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
+      return null;
+    }
+
+    Object value = deserializeCacheValue(remote.value());
+    if (value == NullValue.INSTANCE) {
+      log.debug(
+          "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
+      return null;
+    }
+
+    populateLocalIfUnchanged(localKey, value, stamp);
+    log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
+    return value;
   }
 
-  /**
-   * Return the value to which this cache maps the specified key, obtaining that value from {@code
-   * valueLoader} if necessary. This method provides a simple substitute for the conventional "if
-   * cached, return; otherwise create, cache and return" pattern.
-   *
-   * <p>If the {@code valueLoader} throws an exception, it is wrapped in a {@link
-   * ValueRetrievalException}
-   *
-   * <p>If Redis cannot be queried, {@code valueLoader} will still be executed and value will be
-   * stored in local cache instead.
-   *
-   * @param key the key whose associated value is to be returned
-   * @return the value to which this cache maps the specified key
-   * @throws ValueRetrievalException if the {@code valueLoader} throws an exception or retrieved
-   *     value was {@code null}
-   * @see #get(Object)
-   */
+  /** Loads a value once per local key while keeping user code outside the Redis breaker. */
   @Override
-  @NonNull
   @SuppressWarnings("unchecked")
-  public <T> T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
-    final String localKey = convertKey(key);
+  public <T> @NonNull T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
+    String localKey = convertKey(key);
     Object localValue = localCache.getIfPresent(localKey);
-
     if (localValue != null) {
-      log.trace("Local cache hit for cache '{}' and key '{}'", getName(), localKey);
       return (T) localValue;
     }
 
-    final ReentrantLock lock = makeLock(key);
+    ReentrantLock lock = makeLock(localKey);
     lock.lock();
     try {
       localValue = localCache.getIfPresent(localKey);
       if (localValue != null) {
-        log.trace("Local cache hit for cache '{}' and key '{}' after wait", getName(), localKey);
         return (T) localValue;
       }
 
-      Try<T> redisResult = callRedis(() -> super.get(key, valueLoader));
+      Object remoteValue = lookup(key);
+      if (remoteValue != null) {
+        return (T) remoteValue;
+      }
 
-      redisResult.ifFailure(
-          failure -> {
-            if (failure instanceof ValueRetrievalException valueRetrievalException) {
-              throw valueRetrievalException;
-            }
-          });
+      T loaded;
+      try {
+        loaded = valueLoader.call();
+      } catch (Exception exception) {
+        throw new ValueRetrievalException(key, valueLoader, exception);
+      }
+      if (loaded == null) {
+        throw new ValueRetrievalException(key, valueLoader, null);
+      }
 
-      return redisResult
-          .map(
-              value -> {
-                if (value != null) {
-                  log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
-                  localCache.put(localKey, value);
-                } else {
-                  log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
-                }
-                return value;
-              })
-          .orElse(
-              (ThrowableSupplier<T>)
-                  () -> {
-                    try {
-                      log.trace(
-                          "Executing value loader for cache '{}' and key '{}'",
-                          getName(),
-                          localKey);
-                      T value = valueLoader.call();
-                      if (value == null) {
-                        throw new ValueRetrievalException(key, valueLoader, null);
-                      }
-                      log.trace(
-                          "Value loader supplied entry for cache '{}' and key '{}'",
-                          getName(),
-                          localKey);
-                      localCache.put(localKey, value);
-                      sendViaRedis(localKey);
-                      return value;
-                    } catch (Exception recoverException) {
-                      throw new ValueRetrievalException(key, valueLoader, recoverException);
-                    }
-                  });
+      try {
+        put(key, loaded);
+      } catch (ValueRetrievalException exception) {
+        throw exception;
+      } catch (RuntimeException exception) {
+        throw new ValueRetrievalException(key, valueLoader, exception);
+      }
+      return loaded;
     } finally {
       lock.unlock();
     }
   }
 
-  /**
-   * Associate the specified value with the specified key in this cache.
-   *
-   * <p>If the cache previously contained a mapping for this key, the old value replaced by the
-   * specified value.
-   *
-   * <p>If value is {@code null} specified key will be evicted.
-   *
-   * <p>Actual registration performed in an asynchronous fashion, with later lookups possibly not
-   * seeing the entry yet.
-   *
-   * <p>Use {@link #putIfAbsent} for guaranteed immediate registration for current cache.
-   *
-   * @param key the key with which the specified value is to be associated
-   * @param value the value to be associated with the specified key
-   * @see #putIfAbsent(Object, Object)
-   */
+  /** Writes Redis when available and retains a local-only value during availability failures. */
   @Override
   public void put(@NonNull Object key, @Nullable Object value) {
     if (value == null) {
@@ -317,267 +235,290 @@ public class MultiLevelCache extends RedisCache {
       return;
     }
 
-    final String localKey = convertKey(key);
+    String localKey = convertKey(key);
+    byte[] redisKey = serializeRedisKey(key);
+    byte[] redisValue = serializeCacheValue(value);
+    Duration ttl = timeToLive(key, value);
+    markKeyMutation(localKey);
+
+    RemoteCall<Void> remote =
+        callRedis(
+            () -> {
+              getCacheWriter().put(getName(), redisKey, redisValue, ttl);
+              return null;
+            },
+            "write");
+
     localCache.put(localKey, value);
-    callRedis(() -> super.put(key, value));
-    sendViaRedis(localKey);
+    if (remote.available()) {
+      sendViaRedis(localKey);
+    }
   }
 
   /**
-   * Atomically associate the specified value with the specified key in this cache if it is not set
-   * already.
-   *
-   * <p>This is equivalent to:
-   *
-   * <pre><code>
-   * ValueWrapper existingValue = cache.get(key);
-   * if (existingValue == null) {
-   *     cache.put(key, value);
-   * }
-   * return existingValue;
-   * </code></pre>
-   *
-   * except that the action performed atomically for current cache.
-   *
-   * <p>If value is {@code null} specified key will be evicted.
-   *
-   * @param key the key with which the specified value is to be associated
-   * @param value the value to be associated with the specified key
-   * @return the value to which this cache maps the specified key (which may be {@code null}
-   *     itself), or also {@code null} if the cache did not contain any mapping for that key prior
-   *     to this call. Returning {@code null} is therefore an indicator that the given {@code value}
-   *     has been associated with the key, or it was evicted.
-   * @see #put(Object, Object)
+   * Returns an existing L1 value without Redis I/O. Redis coordinates only cold L1 misses while it
+   * is available.
    */
   @Override
-  public ValueWrapper putIfAbsent(@NonNull Object key, @Nullable Object value) {
+  public @Nullable ValueWrapper putIfAbsent(@NonNull Object key, @Nullable Object value) {
     if (value == null) {
       evict(key);
       return null;
     }
 
-    final ReentrantLock lock = makeLock(key);
-
+    String localKey = convertKey(key);
+    ReentrantLock lock = makeLock(localKey);
+    lock.lock();
     try {
-      lock.lock();
+      Object localValue = localCache.getIfPresent(localKey);
+      if (localValue != null) {
+        return new SimpleValueWrapper(localValue);
+      }
 
-      Object existingValue = lookup(key);
-      if (existingValue == null) {
-        final String localKey = convertKey(key);
+      byte[] redisKey = serializeRedisKey(key);
+      byte[] redisValue = serializeCacheValue(value);
+      Duration ttl = timeToLive(key, value);
+      markKeyMutation(localKey);
+      RemoteCall<byte[]> remote = remotePutIfAbsent(redisKey, redisValue, ttl);
+
+      if (!remote.available()) {
         localCache.put(localKey, value);
-        callRedis(() -> super.putIfAbsent(key, value));
+        return null;
+      }
+      if (remote.value() == null) {
+        localCache.put(localKey, value);
         sendViaRedis(localKey);
         return null;
-      } else {
-        return new SimpleValueWrapper(existingValue);
       }
+
+      Object existingValue = deserializeCacheValue(remote.value());
+      if (existingValue == NullValue.INSTANCE) {
+        RemoteCall<Void> removed =
+            callRedis(
+                () -> {
+                  getCacheWriter().evict(getName(), redisKey);
+                  return null;
+                },
+                "remove legacy null");
+        if (!removed.available()) {
+          localCache.put(localKey, value);
+          return null;
+        }
+        RemoteCall<byte[]> retry = remotePutIfAbsent(redisKey, redisValue, ttl);
+        if (!retry.available() || retry.value() == null) {
+          localCache.put(localKey, value);
+          if (retry.available()) {
+            sendViaRedis(localKey);
+          }
+          return null;
+        }
+        existingValue = deserializeCacheValue(retry.value());
+        if (existingValue == NullValue.INSTANCE) {
+          return null;
+        }
+      }
+      localCache.put(localKey, existingValue);
+      return new SimpleValueWrapper(existingValue);
     } finally {
       lock.unlock();
     }
   }
 
-  /**
-   * Evict the mapping for this key from this cache if it is present.
-   *
-   * <p>Actual eviction performed in an asynchronous fashion, with later lookups possibly still
-   * seeing the entry. Use {@link #evictIfPresent} for guaranteed immediate removal for current
-   * cache.
-   *
-   * @param key the key whose mapping is to be removed from the cache
-   * @see #evictIfPresent(Object)
-   */
+  /** Evicts Redis when available and always evicts L1 for availability failures. */
   @Override
   public void evict(@NonNull Object key) {
-    sendViaRedis(localEvict(key));
+    String localKey = convertKey(key);
+    byte[] redisKey = serializeRedisKey(key);
+    markKeyMutation(localKey);
+    RemoteCall<Void> remote =
+        callRedis(
+            () -> {
+              getCacheWriter().evict(getName(), redisKey);
+              return null;
+            },
+            "evict");
+    localCache.invalidate(localKey);
+    if (remote.available()) {
+      sendViaRedis(localKey);
+    }
   }
 
-  /**
-   * Local copy of {@link #evict(Object)} method for Redis Pub/Sub listener to avoid infinite
-   * message loop
-   *
-   * @param key the key whose mapping is to be removed from the cache
-   * @return computed key for entry to evict
-   * @see #evict(Object)
-   */
   String localEvict(@NonNull Object key) {
-    final String localKey = convertKey(key);
-    localCache.invalidate(localKey);
-    callRedis(() -> super.evict(key));
+    String localKey = convertKey(key);
+    evict(key);
     return localKey;
   }
 
   void invalidateLocalEntry(@NonNull String localKey) {
+    markKeyMutation(localKey);
     localCache.invalidate(localKey);
   }
 
-  /**
-   * Evict the mapping for this key from this cache if it is present, expecting the key to be
-   * immediately invisible for later lookups.
-   *
-   * @param key the key whose mapping is to be removed from the cache
-   * @return {@code true} if local cache was known to have a mapping for this key before, {@code
-   *     false} if it did not (or if prior presence could not be determined)
-   * @see #evict(Object)
-   * @since 5.2
-   */
   @Override
   public boolean evictIfPresent(@NonNull Object key) {
-    final ReentrantLock lock = makeLock(key);
-
+    String localKey = convertKey(key);
+    ReentrantLock lock = makeLock(localKey);
+    lock.lock();
     try {
-      lock.lock();
-
-      final String localKey = convertKey(key);
-      boolean haveLocalMapping = localCache.getIfPresent(localKey) != null;
-
-      localCache.invalidate(localKey);
-      callRedis(() -> super.evict(key));
-      sendViaRedis(localKey);
-
-      return haveLocalMapping;
+      boolean present = localCache.getIfPresent(localKey) != null;
+      evict(key);
+      return present;
     } finally {
       lock.unlock();
     }
   }
 
-  /**
-   * Clear the cache through removing all mappings.
-   *
-   * <p>Actual clearing performed in an asynchronous fashion, with later lookups possibly still
-   * seeing the entries. Use {@link #invalidate()} for guaranteed immediate removal of entries for
-   * current cache.
-   *
-   * @see #invalidate()
-   */
   @Override
   public void clear() {
-    invalidateLocalCache();
-    clearRedisEntries();
-    sendViaRedis(null);
+    clearInternal(null);
+  }
+
+  @Override
+  public void clear(@NonNull String keyPattern) {
+    clearInternal(keyPattern);
   }
 
   void invalidateLocalCache() {
+    cacheVersion.incrementAndGet();
     localCache.invalidateAll();
   }
 
-  /**
-   * Invalidate the cache through removing all mappings, expecting all entries to be immediately
-   * invisible for later lookups.
-   *
-   * @return {@code true} if local cache was known to have mappings before, {@code false} if it did
-   *     not (or if prior presence of entries could not be determined)
-   * @see #clear()
-   * @since 5.2
-   */
   @Override
-  @SuppressWarnings("squid:S1612")
   public boolean invalidate() {
-    final ReentrantLock lock = makeLock(CACHE_WIDE_LOCK_OBJECT);
-
+    cacheWideLock.lock();
     try {
-      lock.lock();
-
       boolean hadLocalMappings = localCache.estimatedSize() > 0;
-
-      invalidateLocalCache();
-      clearRedisEntries();
-      sendViaRedis(null);
-
-      return hadLocalMappings;
+      cacheVersion.incrementAndGet();
+      RemoteCall<Boolean> remote = callRedis(MultiLevelCache.super::invalidate, "invalidate");
+      localCache.invalidateAll();
+      if (remote.available()) {
+        sendViaRedis(null);
+      }
+      return hadLocalMappings || Boolean.TRUE.equals(remote.value());
     } finally {
-      lock.unlock();
+      cacheWideLock.unlock();
     }
   }
 
-  /**
-   * @param call to Redis
-   */
-  private void callRedis(@NonNull Runnable call) {
-    Try.of(
+  private void clearInternal(@Nullable String keyPattern) {
+    cacheVersion.incrementAndGet();
+    RemoteCall<Void> remote =
+        callRedis(
             () -> {
-              cacheCircuitBreaker.decorateRunnable(call).run();
+              if (keyPattern == null) {
+                MultiLevelCache.super.clear("*");
+              } else {
+                MultiLevelCache.super.clear(keyPattern);
+              }
               return null;
-            })
-        .ifFailure(
-            throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
+            },
+            "clear");
+    localCache.invalidateAll();
+    if (remote.available()) {
+      sendViaRedis(null);
+    }
   }
 
-  /**
-   * @param call to Redis
-   * @return execution result as {@link Try}
-   */
-  private <T> Try<T> callRedis(@NonNull CheckedSupplier<T> call) {
-    Try<T> result = Try.of(() -> cacheCircuitBreaker.decorateCheckedSupplier(call).get());
-    result.ifFailure(
-        throwable -> log.debug("Redis call failed for cache '{}'", getName(), throwable));
-    return result;
-  }
-
-  /** Removes all Redis entries belonging to this cache using a pattern match. */
-  private void clearRedisEntries() {
-    String prefix =
-        getCacheConfiguration().usePrefix()
-            ? getCacheConfiguration().getKeyPrefixFor(getName())
-            : getName() + "::";
-    String pattern = prefix + "*";
-
+  private void sendViaRedis(@Nullable String key) {
+    byte[] channel =
+        Objects.requireNonNull(
+            StringRedisSerializer.UTF_8.serialize(properties.getTopic()),
+            "Invalidation channel was not serialized");
+    byte[] body =
+        CacheInvalidationCodec.serialize(
+            new MultiLevelCacheEvictMessage(getName(), key, instanceId));
     callRedis(
         () -> {
-          Set<Object> keys = redisTemplate.keys(pattern);
-          if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
-          }
-        });
+          redisTemplate.execute(
+              (RedisCallback<Long>) connection -> connection.publish(channel, body));
+          return null;
+        },
+        "publish invalidation");
   }
 
-  /**
-   * @param key to send notification about eviction. Can be {@code null}.
-   */
-  private void sendViaRedis(@Nullable String key) {
-    Try.of(
-            () -> {
-              cacheCircuitBreaker
-                  .decorateRunnable(
-                      () ->
-                          redisTemplate.convertAndSend(
-                              properties.getTopic(),
-                              new MultiLevelCacheEvictMessage(getName(), key, instanceId)))
-                  .run();
-              return null;
-            })
-        .ifFailure(
-            throwable ->
-                log.debug(
-                    "Redis eviction notification failed for cache '{}'", getName(), throwable));
+  private <T> RemoteCall<T> callRedis(CheckedSupplier<T> call, String operation) {
+    try {
+      return new RemoteCall<>(true, cacheCircuitBreaker.executeCheckedSupplier(call));
+    } catch (Throwable throwable) {
+      Throwable failure = RedisFailureClassifier.unwrap(throwable);
+      if (RedisFailureClassifier.isAvailabilityFailure(failure)) {
+        log.debug("Redis {} unavailable for cache '{}'", operation, getName(), failure);
+        return new RemoteCall<>(false, null);
+      }
+      throw propagate(failure);
+    }
   }
 
-  /**
-   * @param key to make lock for
-   * @return new {@link ReentrantLock} for synchronizing operations
-   */
-  @NonNull
-  private ReentrantLock makeLock(@NonNull Object key) {
+  private static RuntimeException propagate(Throwable throwable) {
+    if (throwable instanceof RuntimeException runtimeException) {
+      return runtimeException;
+    }
+    if (throwable instanceof Error error) {
+      throw error;
+    }
+    return new IllegalStateException("Unexpected checked Redis failure", throwable);
+  }
+
+  private byte[] serializeRedisKey(Object key) {
+    return serializeCacheKey(createCacheKey(key));
+  }
+
+  private RemoteCall<byte[]> remotePutIfAbsent(byte[] key, byte[] value, Duration ttl) {
+    return callRedis(
+        () -> getCacheWriter().putIfAbsent(getName(), key, value, ttl), "put-if-absent");
+  }
+
+  private Duration timeToLive(Object key, Object value) {
+    return getCacheConfiguration().getTtlFunction().getTimeToLive(key, value);
+  }
+
+  private ReentrantLock makeLock(String localKey) {
     return Objects.requireNonNull(
-        locks.get(key, o -> new ReentrantLock()), LOCK_WAS_NOT_INITIALIZED);
+        locks.get(localKey, ignored -> new ReentrantLock()), LOCK_WAS_NOT_INITIALIZED);
   }
 
-  /**
-   * Adjusts the RedisCacheConfiguration based on the provided properties and RedisTemplate.
-   *
-   * @param properties The MultiLevelCacheConfigurationProperties used to create the
-   *     RedisCacheConfiguration.
-   * @param redisTemplate The RedisTemplate used to get the value serializer for
-   *     RedisSerializationContext.
-   * @return The adjusted RedisCacheConfiguration with updated serialization for values.
-   */
+  private VersionStamp captureVersion(String localKey) {
+    AtomicLong keyVersion =
+        Objects.requireNonNull(
+            mutationVersions.get(localKey, ignored -> new AtomicLong()),
+            "Mutation version was not initialized");
+    return new VersionStamp(keyVersion, keyVersion.get(), cacheVersion.get());
+  }
+
+  private void markKeyMutation(String localKey) {
+    Objects.requireNonNull(
+            mutationVersions.get(localKey, ignored -> new AtomicLong()),
+            "Mutation version was not initialized")
+        .incrementAndGet();
+  }
+
+  private void populateLocalIfUnchanged(String localKey, Object value, VersionStamp stamp) {
+    if (!stamp.isCurrent(cacheVersion)) {
+      return;
+    }
+    localCache.put(localKey, value);
+    if (!stamp.isCurrent(cacheVersion)) {
+      localCache.invalidate(localKey);
+    }
+  }
+
   private static RedisCacheConfiguration adjustRedisCacheConfiguration(
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate) {
-    RedisCacheConfiguration configuration = properties.toRedisCacheConfiguration();
-    RedisSerializer<?> valueSerializer = redisTemplate.getValueSerializer();
-    configuration =
-        configuration.serializeValuesWith(
+    RedisSerializer<?> valueSerializer =
+        Objects.requireNonNull(redisTemplate.getValueSerializer(), "Value serializer is required");
+    return properties
+        .toRedisCacheConfiguration()
+        .disableCachingNullValues()
+        .serializeValuesWith(
             RedisSerializationContext.SerializationPair.fromSerializer(valueSerializer));
-    return configuration;
+  }
+
+  private record RemoteCall<T>(boolean available, @Nullable T value) {}
+
+  private record VersionStamp(AtomicLong keyVersion, long keyValue, long cacheValue) {
+    private boolean isCurrent(AtomicLong currentCacheVersion) {
+      return keyVersion.get() == keyValue && currentCacheVersion.get() == cacheValue;
+    }
   }
 }

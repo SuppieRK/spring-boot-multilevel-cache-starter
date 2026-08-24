@@ -24,6 +24,7 @@
 
 package io.github.suppie.spring.cache;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -36,20 +37,21 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.AutoConfigureAfter;
-import org.springframework.boot.autoconfigure.AutoConfigureBefore;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
 import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.boot.cache.metrics.CacheMeterBinderProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.data.redis.autoconfigure.RedisMessageListenerContainerConfigurer;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -61,10 +63,11 @@ import org.springframework.util.StringUtils;
 
 /** Autoconfiguration properties for this cache */
 @Slf4j
-@Configuration
-@AutoConfigureAfter(DataRedisAutoConfiguration.class)
-@AutoConfigureBefore(CacheAutoConfiguration.class)
+@AutoConfiguration(after = DataRedisAutoConfiguration.class, before = CacheAutoConfiguration.class)
 @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
+@ConditionalOnClass({RedisCache.class, Caffeine.class, CircuitBreaker.class})
+@ConditionalOnSingleCandidate(RedisConnectionFactory.class)
+@ConditionalOnMissingBean(CacheManager.class)
 @EnableConfigurationProperties({
   CacheProperties.class,
   MultiLevelCacheConfigurationProperties.class
@@ -73,6 +76,9 @@ public class MultiLevelCacheAutoConfiguration {
 
   /** Bean name for RedisTemplate used by multi-level cache messaging */
   public static final String CACHE_REDIS_TEMPLATE_NAME = "multiLevelCacheRedisTemplate";
+
+  /** Bean name for an optional custom cache-value serializer. */
+  public static final String CACHE_VALUE_SERIALIZER_NAME = "multiLevelCacheValueSerializer";
 
   /** Bean name for the circuit breaker guarding Redis cache access */
   public static final String CIRCUIT_BREAKER_NAME = "multiLevelCacheCircuitBreaker";
@@ -104,7 +110,8 @@ public class MultiLevelCacheAutoConfiguration {
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
       RedisConnectionFactory connectionFactory,
-      ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
+      @Qualifier(CACHE_VALUE_SERIALIZER_NAME)
+          ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
@@ -170,16 +177,14 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
-   * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
    * @param cacheManager for multi-level caching
    * @return Redis topic listener that handles entry eviction messages
    */
   @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
+  @ConditionalOnMissingBean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
   public MessageListener multiLevelCacheInvalidationMessageListener(
-      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
-          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
-    return createMessageListener(multiLevelCacheRedisTemplate, cacheManager);
+    return createMessageListener(cacheManager);
   }
 
   /**
@@ -189,6 +194,7 @@ public class MultiLevelCacheAutoConfiguration {
    * @return registrar that subscribes the invalidation listener to the configured topic
    */
   @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME)
+  @ConditionalOnMissingBean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME)
   public SmartInitializingSingleton multiLevelCacheInvalidationMessageListenerRegistrar(
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
@@ -204,6 +210,7 @@ public class MultiLevelCacheAutoConfiguration {
    * @return circuit breaker to handle Redis connection exceptions and fallback to use local cache
    */
   @Bean(name = CIRCUIT_BREAKER_NAME)
+  @ConditionalOnMissingBean(name = CIRCUIT_BREAKER_NAME)
   public CircuitBreaker cacheCircuitBreaker(
       MultiLevelCacheConfigurationProperties cacheProperties) {
     CircuitBreakerRegistry cbr = CircuitBreakerRegistry.ofDefaults();
@@ -221,6 +228,8 @@ public class MultiLevelCacheAutoConfiguration {
       cbc.slidingWindowSize(props.getSlidingWindowSize());
       cbc.minimumNumberOfCalls(props.getMinimumNumberOfCalls());
       cbc.waitDurationInOpenState(props.getWaitDurationInOpenState());
+      cbc.recordException(RedisFailureClassifier::isAvailabilityFailure);
+      cbc.ignoreException(throwable -> !RedisFailureClassifier.isAvailabilityFailure(throwable));
 
       Duration recommendedMaxDurationInOpenState =
           cacheProperties
@@ -268,18 +277,13 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
-   * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
    * @param cacheManager for multi-level caching
    * @return Redis topic message listener to coordinate entry eviction
    */
-  private static MessageListener createMessageListener(
-      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
-      MultiLevelCacheManager cacheManager) {
+  static MessageListener createMessageListener(MultiLevelCacheManager cacheManager) {
     return (message, pattern) -> {
       try {
-        MultiLevelCacheEvictMessage request =
-            (MultiLevelCacheEvictMessage)
-                multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
+        MultiLevelCacheEvictMessage request = CacheInvalidationCodec.deserialize(message.getBody());
 
         if (request == null) return;
 
@@ -290,7 +294,7 @@ public class MultiLevelCacheAutoConfiguration {
 
         if (!StringUtils.hasText(cacheName)) return;
 
-        MultiLevelCache cache = (MultiLevelCache) cacheManager.getCache(cacheName);
+        MultiLevelCache cache = cacheManager.getExistingCache(cacheName);
 
         if (cache == null) return;
 
@@ -298,13 +302,8 @@ public class MultiLevelCacheAutoConfiguration {
 
         if (entryKey == null) cache.invalidateLocalCache();
         else cache.invalidateLocalEntry(entryKey);
-      } catch (ClassCastException e) {
-        log.error(
-            "Cannot cast cache instance returned by cache manager to {}",
-            MultiLevelCache.class.getName(),
-            e);
-      } catch (Exception e) {
-        log.debug("Unknown Redis message", e);
+      } catch (RuntimeException exception) {
+        log.debug("Unknown Redis cache invalidation message", exception);
       }
     };
   }

@@ -12,9 +12,9 @@ Please note we have a code of conduct, please follow it in all your interactions
 2. Update the README.md with details of changes to the interface, this includes new environment
    variables, exposed ports, useful file locations and container parameters.
 3. Increase the version numbers in any example files and the README.md to the new version that this
-   Pull Request would represent. The versioning scheme we use is [SemVer](http://semver.org/) where first
-   three numbers represent Spring version in use and the last fourth number represents library code version.
-5. You may merge the Pull Request in once you have the sign-off of at least one other developer.
+   Pull Request would represent. The first three numbers track the Spring version and the fourth
+   number tracks the library release.
+4. You may merge the Pull Request once it has the sign-off of at least one other developer.
 
 ## Guides
 
@@ -41,10 +41,11 @@ The command typically used to build the project is:
 
 ### Spring
 
-* [Spring Boot Gradle Plugin Reference Guide](https://docs.spring.io/spring-boot/docs/2.5.3/gradle-plugin/reference/html/)
-* [Spring cache abstraction](https://docs.spring.io/spring-boot/docs/2.5.3/reference/htmlsingle/#boot-features-caching)
-* [Spring Data Redis (Access+Driver)](https://docs.spring.io/spring-boot/docs/2.5.3/reference/htmlsingle/#boot-features-redis)
-* [Spring Configuration Processor](https://docs.spring.io/spring-boot/docs/2.5.3/reference/htmlsingle/#configuration-metadata-annotation-processor)
+* [Spring Boot Gradle Plugin Reference Guide](https://docs.spring.io/spring-boot/gradle-plugin/index.html)
+* [Spring Boot caching](https://docs.spring.io/spring-boot/reference/io/caching.html)
+* [Spring cache abstraction](https://docs.spring.io/spring-framework/reference/integration/cache.html)
+* [Spring Data Redis cache](https://docs.spring.io/spring-data/redis/reference/redis/redis-cache.html)
+* [Spring configuration metadata](https://docs.spring.io/spring-boot/specification/configuration-metadata/index.html)
 
 ### Third-party libraries
 
@@ -53,7 +54,7 @@ The command typically used to build the project is:
 
 ### Additional test libraries
 
-* [Testcontainers](https://www.testcontainers.org/)
+* [Testcontainers](https://java.testcontainers.org/)
 
 ### Setting up test environment
 
@@ -66,4 +67,5 @@ docker run -d --name redis -p 6379:6379 redis:7.2.4-alpine
 ```shell
 docker run -d --name redisinsight -p 5540:5540 redis/redisinsight:latest -v redisinsight:/data
 ```
-- Redis Insight woiuld be typically available at http://localhost:5540, your Redis URL to connect would typically have IP of your Docker Machine: look into Redis container network setting by running `docker inspect redis` (typically IP would look like `172.17.0.2` or similar).
+- Redis Insight is typically available at http://localhost:5540. Use the mapped localhost Redis
+  port for development and let the repository's Testcontainers tests manage their own Redis.
