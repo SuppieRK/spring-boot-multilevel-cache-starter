@@ -42,6 +42,8 @@ import org.springframework.cache.Cache;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.test.context.ActiveProfiles;
 
 @ActiveProfiles("test")
@@ -49,8 +51,7 @@ import org.springframework.test.context.ActiveProfiles;
     classes = {
       DataRedisAutoConfiguration.class,
       CacheAutoConfiguration.class,
-      MultiLevelCacheAutoConfiguration.class,
-      MultiLevelCacheManager.class
+      MultiLevelCacheAutoConfiguration.class
     })
 class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
 
@@ -202,7 +203,8 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
 
     Assertions.assertTrue(
         cache.evictIfPresent(key),
-        "Entity must be evicted and true must be returned, because value is contained in local cache");
+        "Entity must be evicted and true must be returned, because value is contained in local"
+            + " cache");
 
     Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
     Assertions.assertNull(cache.getLocalCache().getIfPresent(key), "Local cache must evict value");
@@ -227,49 +229,44 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
         key, cache.getLocalCache().getIfPresent(key), "Local cache must contain value");
 
     Assertions.assertDoesNotThrow(() -> cache.clear(), "Method call should not throw an exception");
-    Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
-    Assertions.assertNull(cache.getLocalCache().getIfPresent(key), "Local cache must evict value");
+    Awaitility.await()
+        .pollInterval(AWAIT_POLL)
+        .atMost(AWAIT_SHORT)
+        .untilAsserted(
+            () -> {
+              Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
+              Assertions.assertNull(
+                  cache.getLocalCache().getIfPresent(key), "Local cache must evict value");
+            });
   }
 
   @Test
-  void putBroadcastsInvalidationToOtherInstance() {
+  void customValueSerializerDoesNotBreakCrossInstanceInvalidation() {
     final String key = "putBroadcastsInvalidationToOtherInstance";
 
-    MultiLevelCache localCache = (MultiLevelCache) cacheManager.getCache(key);
+    RedisTemplate<Object, Object> customTemplate = new RedisTemplate<>();
+    customTemplate.setConnectionFactory(multiLevelCacheRedisTemplate.getConnectionFactory());
+    customTemplate.setKeySerializer(StringRedisSerializer.UTF_8);
+    customTemplate.setValueSerializer(stringSerializer());
+    customTemplate.afterPropertiesSet();
+
+    MultiLevelCacheManager primaryManager =
+        new MultiLevelCacheManager(
+            cachePropertiesProvider, cacheProperties, customTemplate, circuitBreaker);
+    MultiLevelCache localCache = (MultiLevelCache) primaryManager.getCache(key);
     Assertions.assertNotNull(localCache, "Cache should be automatically created upon request");
 
     MultiLevelCacheManager secondaryManager =
         new MultiLevelCacheManager(
-            cachePropertiesProvider, cacheProperties, multiLevelCacheRedisTemplate, circuitBreaker);
+            cachePropertiesProvider, cacheProperties, customTemplate, circuitBreaker);
     MultiLevelCache remoteCache = (MultiLevelCache) secondaryManager.getCache(key);
     Assertions.assertNotNull(remoteCache, "Secondary cache should be available");
 
     RedisMessageListenerContainer remoteListener = new RedisMessageListenerContainer();
     remoteListener.setConnectionFactory(
-        Objects.requireNonNull(multiLevelCacheRedisTemplate.getConnectionFactory()));
+        Objects.requireNonNull(customTemplate.getConnectionFactory()));
     remoteListener.addMessageListener(
-        (message, pattern) -> {
-          MultiLevelCacheEvictMessage event =
-              (MultiLevelCacheEvictMessage)
-                  multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
-          if (event == null) {
-            return;
-          }
-          if (secondaryManager.getInstanceId().equals(event.getSenderId())) {
-            return;
-          }
-
-          MultiLevelCache cache = (MultiLevelCache) secondaryManager.getCache(event.getCacheName());
-          if (cache == null) {
-            return;
-          }
-
-          if (event.getEntryKey() == null) {
-            cache.invalidateLocalCache();
-          } else {
-            cache.invalidateLocalEntry(event.getEntryKey());
-          }
-        },
+        MultiLevelCacheAutoConfiguration.createMessageListener(customTemplate, secondaryManager),
         new ChannelTopic(cacheProperties.getTopic()));
     remoteListener.afterPropertiesSet();
     remoteListener.start();
@@ -299,6 +296,11 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
       } catch (Exception ignored) {
       }
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static RedisSerializer<Object> stringSerializer() {
+    return (RedisSerializer<Object>) (RedisSerializer<?>) StringRedisSerializer.UTF_8;
   }
 
   @Test

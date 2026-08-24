@@ -24,6 +24,8 @@
 
 package io.github.suppie.spring.cache;
 
+import static org.mockito.Mockito.when;
+
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker.State;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.SlidingWindowType;
@@ -40,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -49,7 +52,7 @@ import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.Cache;
-import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.test.context.ActiveProfiles;
@@ -60,8 +63,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
     classes = {
       DataRedisAutoConfiguration.class,
       CacheAutoConfiguration.class,
-      MultiLevelCacheAutoConfiguration.class,
-      MultiLevelCacheManager.class
+      MultiLevelCacheAutoConfiguration.class
     })
 class MultiLevelCacheTest {
   private static final AtomicInteger COUNTER = new AtomicInteger(0);
@@ -71,8 +73,13 @@ class MultiLevelCacheTest {
   @MockitoBean(name = MultiLevelCacheAutoConfiguration.REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
   RedisMessageListenerContainer redisMessageListenerContainer;
 
-  @MockitoBean RedisConnection redisConnection;
   @MockitoBean RedisConnectionFactory redisConnectionFactory;
+
+  @BeforeEach
+  void redisIsUnavailable() {
+    when(redisConnectionFactory.getConnection())
+        .thenThrow(new RedisConnectionFailureException("Test Redis is unavailable"));
+  }
 
   @ParameterizedTest
   @MethodSource("operations")

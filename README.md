@@ -28,14 +28,14 @@ the in-memory tier, guarded by a Resilience4j circuit breaker.
 <dependency>
     <groupId>io.github.suppierk</groupId>
     <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-    <version>4.1.0.0</version>
+    <version>4.1.1.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.0.0'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.0'
 ```
 
 ### Examples
@@ -43,6 +43,24 @@ implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.0.0'
 - `examples/basic-demo` — minimal REST service demonstrating `@Cacheable` with the starter. Clone the repo, start Redis via `docker compose up -d` inside the example directory, then run `./gradlew :examples:basic-demo:bootRun` from the project root.
 
 ## Use cases
+
+### Cache behavior
+
+- Caffeine is always checked first. An L1 hit is returned without calling Redis or the circuit
+  breaker.
+- Redis is the shared L2 fallback after an L1 miss. A Redis hit warms L1.
+- On a cold `putIfAbsent`, Redis coordinates concurrent connected instances. If Redis is
+  unavailable, the operation remains atomic only inside the current application instance.
+- Connection failures, timeouts, and an open circuit breaker fall back to local caching. Cache key
+  conversion, serialization, validation, and programming errors are propagated to the caller.
+- Null values are not cached. `put(key, null)` and `putIfAbsent(key, null)` retain their existing
+  eviction behavior, and a loader returning null fails with `Cache.ValueRetrievalException`.
+- Redis Pub/Sub invalidation uses its own stable v0 JSON codec, independently of the configured
+  cache-value serializer.
+
+Spring's asynchronous `Cache.retrieve(...)` methods are not yet multilevel-aware. Applications
+that require L1-first behavior should use the synchronous cache methods until async support is
+implemented.
 
 ### Suitable for
 

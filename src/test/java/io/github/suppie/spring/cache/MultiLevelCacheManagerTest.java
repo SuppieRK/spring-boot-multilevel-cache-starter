@@ -41,8 +41,7 @@ import org.springframework.test.context.ActiveProfiles;
     classes = {
       DataRedisAutoConfiguration.class,
       CacheAutoConfiguration.class,
-      MultiLevelCacheAutoConfiguration.class,
-      MultiLevelCacheManager.class
+      MultiLevelCacheAutoConfiguration.class
     })
 class MultiLevelCacheManagerTest extends AbstractRedisIntegrationTest {
   @Autowired MultiLevelCacheManager cacheManager;

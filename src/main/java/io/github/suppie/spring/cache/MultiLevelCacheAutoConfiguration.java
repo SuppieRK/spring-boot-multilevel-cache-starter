@@ -24,6 +24,7 @@
 
 package io.github.suppie.spring.cache;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -33,23 +34,25 @@ import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.AutoConfigureAfter;
-import org.springframework.boot.autoconfigure.AutoConfigureBefore;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnSingleCandidate;
 import org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration;
 import org.springframework.boot.cache.autoconfigure.CacheProperties;
 import org.springframework.boot.cache.metrics.CacheMeterBinderProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.data.redis.autoconfigure.RedisMessageListenerContainerConfigurer;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -61,10 +64,11 @@ import org.springframework.util.StringUtils;
 
 /** Autoconfiguration properties for this cache */
 @Slf4j
-@Configuration
-@AutoConfigureAfter(DataRedisAutoConfiguration.class)
-@AutoConfigureBefore(CacheAutoConfiguration.class)
+@AutoConfiguration(after = DataRedisAutoConfiguration.class, before = CacheAutoConfiguration.class)
 @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
+@ConditionalOnClass({RedisCache.class, Caffeine.class, CircuitBreaker.class})
+@ConditionalOnSingleCandidate(RedisConnectionFactory.class)
+@ConditionalOnMissingBean(CacheManager.class)
 @EnableConfigurationProperties({
   CacheProperties.class,
   MultiLevelCacheConfigurationProperties.class
@@ -170,11 +174,13 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
-   * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
+   * @param multiLevelCacheRedisTemplate to receive legacy invalidation messages during rolling
+   *     upgrades
    * @param cacheManager for multi-level caching
    * @return Redis topic listener that handles entry eviction messages
    */
   @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
+  @ConditionalOnMissingBean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
   public MessageListener multiLevelCacheInvalidationMessageListener(
       @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
           RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
@@ -189,6 +195,7 @@ public class MultiLevelCacheAutoConfiguration {
    * @return registrar that subscribes the invalidation listener to the configured topic
    */
   @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME)
+  @ConditionalOnMissingBean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME)
   public SmartInitializingSingleton multiLevelCacheInvalidationMessageListenerRegistrar(
       MultiLevelCacheConfigurationProperties cacheProperties,
       @Qualifier(REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
@@ -204,6 +211,7 @@ public class MultiLevelCacheAutoConfiguration {
    * @return circuit breaker to handle Redis connection exceptions and fallback to use local cache
    */
   @Bean(name = CIRCUIT_BREAKER_NAME)
+  @ConditionalOnMissingBean(name = CIRCUIT_BREAKER_NAME)
   public CircuitBreaker cacheCircuitBreaker(
       MultiLevelCacheConfigurationProperties cacheProperties) {
     CircuitBreakerRegistry cbr = CircuitBreakerRegistry.ofDefaults();
@@ -221,6 +229,8 @@ public class MultiLevelCacheAutoConfiguration {
       cbc.slidingWindowSize(props.getSlidingWindowSize());
       cbc.minimumNumberOfCalls(props.getMinimumNumberOfCalls());
       cbc.waitDurationInOpenState(props.getWaitDurationInOpenState());
+      cbc.recordException(RedisFailureClassifier::isAvailabilityFailure);
+      cbc.ignoreException(throwable -> !RedisFailureClassifier.isAvailabilityFailure(throwable));
 
       Duration recommendedMaxDurationInOpenState =
           cacheProperties
@@ -230,8 +240,9 @@ public class MultiLevelCacheAutoConfiguration {
 
       if (props.getWaitDurationInOpenState().compareTo(recommendedMaxDurationInOpenState) > 0) {
         log.warn(
-            "Cache circuit breaker wait duration in open state {} is more than recommended value of {}, "
-                + "this can result in local cache expiry while circuit breaker is still in OPEN state.",
+            "Cache circuit breaker wait duration in open state {} is more than recommended value of"
+                + " {}, this can result in local cache expiry while circuit breaker is still in"
+                + " OPEN state.",
             props.getWaitDurationInOpenState(),
             recommendedMaxDurationInOpenState);
       }
@@ -268,44 +279,58 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
-   * @param multiLevelCacheRedisTemplate to receive messages about evicted entries
+   * @param multiLevelCacheRedisTemplate to decode legacy invalidation messages during rolling
+   *     upgrades
    * @param cacheManager for multi-level caching
    * @return Redis topic message listener to coordinate entry eviction
    */
-  private static MessageListener createMessageListener(
+  static MessageListener createMessageListener(
       RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
-    return (message, pattern) -> {
-      try {
-        MultiLevelCacheEvictMessage request =
-            (MultiLevelCacheEvictMessage)
-                multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
+    return (message, pattern) ->
+        handleInvalidationMessage(message.getBody(), multiLevelCacheRedisTemplate, cacheManager);
+  }
 
-        if (request == null) return;
+  private static void handleInvalidationMessage(
+      byte[] body,
+      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
+      MultiLevelCacheManager cacheManager) {
+    try {
+      MultiLevelCacheEvictMessage request =
+          deserializeInvalidationMessage(body, multiLevelCacheRedisTemplate);
 
-        if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
+      if (request == null) return;
 
-        String cacheName = request.getCacheName();
-        String entryKey = request.getEntryKey();
+      if (cacheManager.getInstanceId().equals(request.getSenderId())) return;
 
-        if (!StringUtils.hasText(cacheName)) return;
+      String cacheName = request.getCacheName();
+      String entryKey = request.getEntryKey();
 
-        MultiLevelCache cache = (MultiLevelCache) cacheManager.getCache(cacheName);
+      if (!StringUtils.hasText(cacheName)) return;
 
-        if (cache == null) return;
+      MultiLevelCache cache = cacheManager.getExistingCache(cacheName);
 
-        log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
+      if (cache == null) return;
 
-        if (entryKey == null) cache.invalidateLocalCache();
-        else cache.invalidateLocalEntry(entryKey);
-      } catch (ClassCastException e) {
-        log.error(
-            "Cannot cast cache instance returned by cache manager to {}",
-            MultiLevelCache.class.getName(),
-            e);
-      } catch (Exception e) {
-        log.debug("Unknown Redis message", e);
+      log.trace("Received Redis message to evict key {} from cache {}", entryKey, cacheName);
+
+      if (entryKey == null) cache.invalidateLocalCache();
+      else cache.invalidateLocalEntry(entryKey);
+    } catch (RuntimeException exception) {
+      log.debug("Unknown Redis cache invalidation message", exception);
+    }
+  }
+
+  private static @Nullable MultiLevelCacheEvictMessage deserializeInvalidationMessage(
+      byte[] body, RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+    try {
+      return CacheInvalidationCodec.deserialize(body);
+    } catch (RuntimeException stableCodecFailure) {
+      Object legacyValue = multiLevelCacheRedisTemplate.getValueSerializer().deserialize(body);
+      if (legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage) {
+        return legacyMessage;
       }
-    };
+      throw stableCodecFailure;
+    }
   }
 }
