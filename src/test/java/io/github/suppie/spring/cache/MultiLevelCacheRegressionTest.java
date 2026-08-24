@@ -114,6 +114,17 @@ class MultiLevelCacheRegressionTest {
   }
 
   @Test
+  void availabilityFailureMakesPutIfAbsentStoreLocally() {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    writer.failWith(new RedisConnectionFailureException("Redis is unavailable"));
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("put-if-absent-availability"));
+
+    assertThat(cache.putIfAbsent("key", "fallback")).isNull();
+    assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isEqualTo("fallback");
+  }
+
+  @Test
   void invalidationDuringRemoteReadDoesNotRepopulateLocalCache() throws Exception {
     TestRedisCacheWriter writer = new TestRedisCacheWriter();
     MultiLevelCache cache = cache("cache", writer, RedisSerializer.json(), breaker("stale-read"));
