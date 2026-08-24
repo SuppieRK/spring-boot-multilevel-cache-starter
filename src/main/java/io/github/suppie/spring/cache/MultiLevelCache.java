@@ -29,6 +29,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.core.functions.CheckedSupplier;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
@@ -424,16 +425,43 @@ public class MultiLevelCache extends RedisCache {
         Objects.requireNonNull(
             StringRedisSerializer.UTF_8.serialize(properties.getTopic()),
             "Invalidation channel was not serialized");
-    byte[] body =
-        CacheInvalidationCodec.serialize(
-            new MultiLevelCacheEvictMessage(getName(), key, instanceId));
+    MultiLevelCacheEvictMessage message =
+        new MultiLevelCacheEvictMessage(getName(), key, instanceId);
+    byte[] body = CacheInvalidationCodec.serialize(message);
+    byte @Nullable [] legacyBody = serializeLegacyInvalidation(message, body);
     callRedis(
         () -> {
           redisTemplate.execute(
-              (RedisCallback<Long>) connection -> connection.publish(channel, body));
+              (RedisCallback<Long>)
+                  connection -> {
+                    Long recipients = connection.publish(channel, body);
+                    if (legacyBody != null) {
+                      connection.publish(channel, legacyBody);
+                    }
+                    return recipients;
+                  });
           return null;
         },
         "publish invalidation");
+  }
+
+  private byte @Nullable [] serializeLegacyInvalidation(
+      MultiLevelCacheEvictMessage message, byte[] stableBody) {
+    try {
+      byte[] legacyBody = legacyValueSerializer().serialize(message);
+      return legacyBody != null && !Arrays.equals(legacyBody, stableBody) ? legacyBody : null;
+    } catch (RuntimeException exception) {
+      log.debug(
+          "Legacy cache invalidation serializer cannot encode messages for cache '{}'",
+          getName(),
+          exception);
+      return null;
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private RedisSerializer<Object> legacyValueSerializer() {
+    return (RedisSerializer<Object>) redisTemplate.getValueSerializer();
   }
 
   private <T> RemoteCall<T> callRedis(CheckedSupplier<T> call, String operation) {

@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,6 +20,7 @@ import org.springframework.data.redis.connection.DefaultMessage;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
@@ -66,7 +69,7 @@ class MultiLevelCacheInvalidationTest {
     byte[] body =
         CacheInvalidationCodec.serialize(
             new MultiLevelCacheEvictMessage("unknown", "key", "other-instance"));
-    MultiLevelCacheAutoConfiguration.createMessageListener(manager)
+    MultiLevelCacheAutoConfiguration.createMessageListener(template, manager)
         .onMessage(new DefaultMessage("topic".getBytes(), body), null);
 
     assertThat(manager.getCacheNames()).isEmpty();
@@ -78,7 +81,7 @@ class MultiLevelCacheInvalidationTest {
     MultiLevelCacheManager manager = manager(template);
     MultiLevelCache cache = (MultiLevelCache) manager.getCache("known");
     cache.getLocalCache().put(cache.toLocalKey("key"), "value");
-    var listener = MultiLevelCacheAutoConfiguration.createMessageListener(manager);
+    var listener = MultiLevelCacheAutoConfiguration.createMessageListener(template, manager);
 
     assertThatCode(
             () ->
@@ -91,6 +94,54 @@ class MultiLevelCacheInvalidationTest {
     listener.onMessage(new DefaultMessage("topic".getBytes(), selfMessage), null);
 
     assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isEqualTo("value");
+  }
+
+  @Test
+  void legacyCustomSerializerMessagesRemainReadableDuringRollingUpgrade() {
+    RedisTemplate<Object, Object> template = listenerTemplate();
+    RedisSerializer<Object> legacySerializer = new JdkSerializationRedisSerializer();
+    doReturn(legacySerializer).when(template).getValueSerializer();
+    MultiLevelCacheManager manager = manager(template);
+    MultiLevelCache cache = (MultiLevelCache) manager.getCache("known");
+    cache.getLocalCache().put(cache.toLocalKey("key"), "value");
+    byte[] body =
+        legacySerializer.serialize(
+            new MultiLevelCacheEvictMessage("known", "key", "other-instance"));
+
+    MultiLevelCacheAutoConfiguration.createMessageListener(template, manager)
+        .onMessage(new DefaultMessage("topic".getBytes(), body), null);
+
+    assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+  }
+
+  @Test
+  void compatibleLegacyPayloadIsPublishedAlongsideStablePayload() {
+    RedisConnection connection = mock(RedisConnection.class);
+    when(connection.publish(any(byte[].class), any(byte[].class))).thenReturn(1L);
+    RedisConnectionFactory connectionFactory = mock(RedisConnectionFactory.class);
+    when(connectionFactory.getConnection()).thenReturn(connection);
+    RedisSerializer<Object> legacySerializer = new JdkSerializationRedisSerializer();
+    RedisTemplate<Object, Object> template = new RedisTemplate<>();
+    template.setConnectionFactory(connectionFactory);
+    template.setValueSerializer(legacySerializer);
+    template.afterPropertiesSet();
+    MultiLevelCache cache =
+        new MultiLevelCache(
+            "cache",
+            new MultiLevelCacheConfigurationProperties(),
+            new TestRedisCacheWriter(),
+            template,
+            Caffeine.newBuilder().build(),
+            CircuitBreaker.ofDefaults("legacy-publication"),
+            "instance");
+
+    cache.put("key", "value");
+
+    ArgumentCaptor<byte[]> bodies = ArgumentCaptor.forClass(byte[].class);
+    verify(connection, times(2)).publish(any(byte[].class), bodies.capture());
+    byte[] expectedLegacyBody =
+        legacySerializer.serialize(new MultiLevelCacheEvictMessage("cache", "key", "instance"));
+    assertThat(bodies.getAllValues()).anyMatch(body -> Arrays.equals(body, expectedLegacyBody));
   }
 
   private static RedisTemplate<Object, Object> listenerTemplate() {

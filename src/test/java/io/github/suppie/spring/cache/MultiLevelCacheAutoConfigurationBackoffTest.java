@@ -12,7 +12,10 @@ import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 class MultiLevelCacheAutoConfigurationBackoffTest {
   private final ApplicationContextRunner runner =
@@ -70,6 +73,22 @@ class MultiLevelCacheAutoConfigurationBackoffTest {
             });
   }
 
+  @Test
+  void legacyUniquelyTypedSerializerIsRetainedWithoutReservedBeanName() {
+    runner
+        .withUserConfiguration(LegacySerializerConfiguration.class)
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              RedisTemplate<?, ?> template =
+                  context.getBean(
+                      MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME,
+                      RedisTemplate.class);
+              assertThat(template.getValueSerializer())
+                  .isSameAs(LegacySerializerConfiguration.SERIALIZER);
+            });
+  }
+
   @Configuration(proxyBeanMethods = false)
   static class UserCacheManagerConfiguration {
     @Bean
@@ -108,6 +127,28 @@ class MultiLevelCacheAutoConfigurationBackoffTest {
     @Bean
     RedisConnectionFactory secondRedisConnectionFactory() {
       return mock(RedisConnectionFactory.class);
+    }
+  }
+
+  @Configuration(proxyBeanMethods = false)
+  static class LegacySerializerConfiguration {
+    @SuppressWarnings("unchecked")
+    static final RedisSerializer<Object> SERIALIZER =
+        (RedisSerializer<Object>) (RedisSerializer<?>) StringRedisSerializer.UTF_8;
+
+    @Bean
+    RedisConnectionFactory redisConnectionFactory() {
+      return mock(RedisConnectionFactory.class);
+    }
+
+    @Bean(name = MultiLevelCacheAutoConfiguration.REDIS_MESSAGE_LISTENER_CONTAINER_NAME)
+    RedisMessageListenerContainer redisMessageListenerContainer() {
+      return mock(RedisMessageListenerContainer.class);
+    }
+
+    @Bean
+    RedisSerializer<Object> legacySerializerWithArbitraryBeanName() {
+      return SERIALIZER;
     }
   }
 }

@@ -189,7 +189,8 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
 
     Assertions.assertThat(output)
         .contains(
-            "Cache circuit breaker wait duration in open state PT3S is more than recommended value of PT1S");
+            "Cache circuit breaker wait duration in open state PT3S is more than recommended value"
+                + " of PT1S");
   }
 
   @Test
@@ -247,7 +248,7 @@ class MultiLevelCacheAutoConfigurationTest extends AbstractRedisIntegrationTest 
 
   static class CustomSerializerConfiguration {
     @Bean
-    RedisSerializer<@NonNull Object> multiLevelCacheValueSerializer() {
+    RedisSerializer<@NonNull Object> legacyCustomValueSerializer() {
       return (RedisSerializer<@NonNull Object>) (RedisSerializer<?>) new StringRedisSerializer();
     }
   }

@@ -18,6 +18,8 @@
 
 - Existing public constructors, property names, bean names, Redis key layout, topic, and v0
   invalidation message remain unchanged.
-- `AFTER_UPDATE` and `AFTER_READ` remain behaviorally compatible but are deprecated for a future
-  major release.
+- Existing custom cache-value serializer discovery remains unchanged.
+- Rolling upgrades accept both stable JSON and legacy custom-serializer invalidation messages;
+  publishers emit a best-effort legacy copy when the custom serializer supports the message type.
+- `AFTER_CREATE`, `AFTER_UPDATE`, and `AFTER_READ` remain supported and unchanged.
 - Asynchronous `Cache.retrieve(...)` methods are not yet multilevel-aware.

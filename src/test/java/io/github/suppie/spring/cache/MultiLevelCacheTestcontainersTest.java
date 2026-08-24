@@ -203,7 +203,8 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
 
     Assertions.assertTrue(
         cache.evictIfPresent(key),
-        "Entity must be evicted and true must be returned, because value is contained in local cache");
+        "Entity must be evicted and true must be returned, because value is contained in local"
+            + " cache");
 
     Assertions.assertNull(cache.nativeGet(key), "Underlying cache must evict value");
     Assertions.assertNull(cache.getLocalCache().getIfPresent(key), "Local cache must evict value");
@@ -265,7 +266,7 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     remoteListener.setConnectionFactory(
         Objects.requireNonNull(customTemplate.getConnectionFactory()));
     remoteListener.addMessageListener(
-        MultiLevelCacheAutoConfiguration.createMessageListener(secondaryManager),
+        MultiLevelCacheAutoConfiguration.createMessageListener(customTemplate, secondaryManager),
         new ChannelTopic(cacheProperties.getTopic()));
     remoteListener.afterPropertiesSet();
     remoteListener.start();

@@ -77,9 +77,6 @@ public class MultiLevelCacheAutoConfiguration {
   /** Bean name for RedisTemplate used by multi-level cache messaging */
   public static final String CACHE_REDIS_TEMPLATE_NAME = "multiLevelCacheRedisTemplate";
 
-  /** Bean name for an optional custom cache-value serializer. */
-  public static final String CACHE_VALUE_SERIALIZER_NAME = "multiLevelCacheValueSerializer";
-
   /** Bean name for the circuit breaker guarding Redis cache access */
   public static final String CIRCUIT_BREAKER_NAME = "multiLevelCacheCircuitBreaker";
 
@@ -110,8 +107,7 @@ public class MultiLevelCacheAutoConfiguration {
   @ConditionalOnMissingBean(name = CACHE_REDIS_TEMPLATE_NAME)
   public RedisTemplate<Object, Object> multiLevelCacheRedisTemplate(
       RedisConnectionFactory connectionFactory,
-      @Qualifier(CACHE_VALUE_SERIALIZER_NAME)
-          ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
+      ObjectProvider<@NonNull RedisSerializer<@NonNull Object>> valueSerializerProvider) {
     RedisTemplate<Object, Object> template = new RedisTemplate<>();
     template.setConnectionFactory(connectionFactory);
     template.setKeySerializer(new StringRedisSerializer());
@@ -177,14 +173,18 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * @param multiLevelCacheRedisTemplate to receive legacy invalidation messages during rolling
+   *     upgrades
    * @param cacheManager for multi-level caching
    * @return Redis topic listener that handles entry eviction messages
    */
   @Bean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
   @ConditionalOnMissingBean(name = CACHE_INVALIDATION_MESSAGE_LISTENER_NAME)
   public MessageListener multiLevelCacheInvalidationMessageListener(
+      @Qualifier(CACHE_REDIS_TEMPLATE_NAME)
+          RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
       MultiLevelCacheManager cacheManager) {
-    return createMessageListener(cacheManager);
+    return createMessageListener(multiLevelCacheRedisTemplate, cacheManager);
   }
 
   /**
@@ -239,8 +239,9 @@ public class MultiLevelCacheAutoConfiguration {
 
       if (props.getWaitDurationInOpenState().compareTo(recommendedMaxDurationInOpenState) > 0) {
         log.warn(
-            "Cache circuit breaker wait duration in open state {} is more than recommended value of {}, "
-                + "this can result in local cache expiry while circuit breaker is still in OPEN state.",
+            "Cache circuit breaker wait duration in open state {} is more than recommended value of"
+                + " {}, this can result in local cache expiry while circuit breaker is still in"
+                + " OPEN state.",
             props.getWaitDurationInOpenState(),
             recommendedMaxDurationInOpenState);
       }
@@ -277,13 +278,27 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * @param multiLevelCacheRedisTemplate to decode legacy invalidation messages during rolling
+   *     upgrades
    * @param cacheManager for multi-level caching
    * @return Redis topic message listener to coordinate entry eviction
    */
-  static MessageListener createMessageListener(MultiLevelCacheManager cacheManager) {
+  static MessageListener createMessageListener(
+      RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
+      MultiLevelCacheManager cacheManager) {
     return (message, pattern) -> {
       try {
-        MultiLevelCacheEvictMessage request = CacheInvalidationCodec.deserialize(message.getBody());
+        MultiLevelCacheEvictMessage request;
+        try {
+          request = CacheInvalidationCodec.deserialize(message.getBody());
+        } catch (RuntimeException stableCodecFailure) {
+          Object legacyValue =
+              multiLevelCacheRedisTemplate.getValueSerializer().deserialize(message.getBody());
+          if (!(legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage)) {
+            throw stableCodecFailure;
+          }
+          request = legacyMessage;
+        }
 
         if (request == null) return;
 
