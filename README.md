@@ -166,4 +166,5 @@ Pull requests are welcome. Before submitting, please run:
 ./gradlew jmh
 ```
 
-Benchmarks are kept short so you can verify regressions locally without burning an afternoon.
+The complete five-fork benchmark suite covers the operational cache API, invalidation, and
+synchronized contention waves, and typically takes 25–30 minutes on a developer workstation.
