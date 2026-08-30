@@ -1,5 +1,6 @@
 package io.github.suppie.spring.cache.benchmark;
 
+import ch.qos.logback.classic.LoggerContext;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.suppie.spring.cache.MultiLevelCache;
@@ -22,9 +23,11 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.infra.Blackhole;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.cache.CacheStatistics;
 import org.springframework.data.redis.cache.CacheStatisticsCollector;
 import org.springframework.data.redis.cache.RedisCacheWriter;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
@@ -54,12 +57,14 @@ public class MultiLevelCacheBenchmark {
 
   @Setup(Level.Trial)
   public void setUp() {
+    disableCacheLogging();
+
     MultiLevelCacheConfigurationProperties properties =
         new MultiLevelCacheConfigurationProperties();
     properties.getLocal().setMaxSize(10_000);
     properties.setTimeToLive(Duration.ofHours(1));
 
-    RedisTemplate<Object, Object> redisTemplate = new RedisTemplate<>();
+    RedisTemplate<Object, Object> redisTemplate = new NoOpPubSubRedisTemplate();
     redisTemplate.setKeySerializer(new StringRedisSerializer());
     redisTemplate.setValueSerializer(new JdkSerializationRedisSerializer());
 
@@ -86,6 +91,11 @@ public class MultiLevelCacheBenchmark {
     hitLoader = () -> VALUE;
 
     producingLoader = () -> "value-" + missValueCounter.incrementAndGet();
+  }
+
+  private static void disableCacheLogging() {
+    LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+    loggerContext.getLogger(MultiLevelCache.class).setLevel(ch.qos.logback.classic.Level.WARN);
   }
 
   @Benchmark
@@ -119,6 +129,20 @@ public class MultiLevelCacheBenchmark {
   @State(Scope.Thread)
   public static class ThreadState {
     int nextIndex;
+  }
+
+  /** Keeps invalidation publication in the measured path without requiring a Redis connection. */
+  static class NoOpPubSubRedisTemplate extends RedisTemplate<Object, Object> {
+
+    @Override
+    public <T> T execute(RedisCallback<T> action) {
+      return null;
+    }
+
+    @Override
+    public <T> T execute(RedisCallback<T> action, boolean exposeConnection) {
+      return null;
+    }
   }
 
   /**
