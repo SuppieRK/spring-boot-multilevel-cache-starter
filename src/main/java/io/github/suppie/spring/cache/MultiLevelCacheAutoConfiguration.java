@@ -62,7 +62,10 @@ import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.util.StringUtils;
 
-/** Autoconfiguration properties for this cache */
+/**
+ * Configures the L1-first cache manager, Redis access, circuit breaker, and cross-node invalidation
+ * listener when Spring's Redis cache type is selected.
+ */
 @Slf4j
 @AutoConfiguration(after = DataRedisAutoConfiguration.class, before = CacheAutoConfiguration.class)
 @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
@@ -75,30 +78,30 @@ import org.springframework.util.StringUtils;
 })
 public class MultiLevelCacheAutoConfiguration {
 
-  /** Bean name for RedisTemplate used by multi-level cache messaging */
+  /** Bean name for the Redis template used by multi-level cache access and messaging. */
   public static final String CACHE_REDIS_TEMPLATE_NAME = "multiLevelCacheRedisTemplate";
 
-  /** Bean name for the circuit breaker guarding Redis cache access */
+  /** Bean name for the circuit breaker guarding Redis cache access. */
   public static final String CIRCUIT_BREAKER_NAME = "multiLevelCacheCircuitBreaker";
 
-  /** Named configuration profile for the cache circuit breaker */
+  /** Named configuration profile for the cache circuit breaker. */
   public static final String CIRCUIT_BREAKER_CONFIGURATION_NAME =
       "multiLevelCacheCircuitBreakerConfiguration";
 
-  /** Bean name for the shared Redis message listener container */
+  /** Bean name for the shared Redis message listener container. */
   public static final String REDIS_MESSAGE_LISTENER_CONTAINER_NAME =
       "redisMessageListenerContainer";
 
-  /** Bean name for the listener that handles multi-level cache invalidation messages */
+  /** Bean name for the listener that handles multi-level cache invalidation messages. */
   public static final String CACHE_INVALIDATION_MESSAGE_LISTENER_NAME =
       "multiLevelCacheInvalidationMessageListener";
 
-  /** Bean name for the registrar that attaches the invalidation listener to Redis */
+  /** Bean name for the registrar that attaches the invalidation listener to Redis. */
   public static final String CACHE_INVALIDATION_MESSAGE_LISTENER_REGISTRAR_NAME =
       "multiLevelCacheInvalidationMessageListenerRegistrar";
 
   /**
-   * Instantiates {@link RedisTemplate} to use for sending {@link MultiLevelCacheEvictMessage}
+   * Creates the Redis template used for cache values and invalidation messages.
    *
    * @param connectionFactory to use in template
    * @param valueSerializerProvider to use in template
@@ -122,6 +125,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Creates the cache manager that owns local tiers and delegates remote operations to Redis.
+   *
    * @param highLevelCacheProperties as a baseline
    * @param cacheProperties for multi-level cache
    * @param circuitBreaker if application defined its own circuit breaker
@@ -140,6 +145,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Exposes Caffeine metrics for each local tier.
+   *
    * @return cache meter binder for local level of multi level cache
    */
   @Bean
@@ -152,6 +159,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Creates a Redis listener container when the application does not provide one.
+   *
    * @param redisConnectionFactory to use when a shared listener container is not provided
    * @param configurerProvider to align the fallback listener container with Spring Boot settings
    * @return Redis topic listener container to coordinate entry eviction
@@ -174,6 +183,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Creates the listener that applies remote invalidations to existing local caches.
+   *
    * @param multiLevelCacheRedisTemplate to receive legacy invalidation messages during rolling
    *     upgrades
    * @param cacheManager for multi-level caching
@@ -189,6 +200,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Registers the invalidation listener after all singleton beans have been created.
+   *
    * @param cacheProperties for multi-level cache
    * @param listenerContainer shared Redis topic listener container
    * @param messageListener listener that handles entry eviction messages
@@ -207,6 +220,8 @@ public class MultiLevelCacheAutoConfiguration {
   }
 
   /**
+   * Creates the circuit breaker that enables local-cache fallback during Redis outages.
+   *
    * @param cacheProperties to get circuit breaker properties for fault tolerance
    * @return circuit breaker to handle Redis connection exceptions and fallback to use local cache
    */
@@ -291,6 +306,7 @@ public class MultiLevelCacheAutoConfiguration {
         handleInvalidationMessage(message.getBody(), multiLevelCacheRedisTemplate, cacheManager);
   }
 
+  /** Decodes and safely applies one inbound invalidation message. */
   private static void handleInvalidationMessage(
       byte[] body,
       RedisTemplate<Object, Object> multiLevelCacheRedisTemplate,
@@ -321,16 +337,50 @@ public class MultiLevelCacheAutoConfiguration {
     }
   }
 
+  /**
+   * Routes Java streams directly to the configured legacy serializer and all other payloads to the
+   * stable codec first, retaining fallback support for custom rolling-upgrade serializers.
+   */
   private static @Nullable MultiLevelCacheEvictMessage deserializeInvalidationMessage(
       byte[] body, RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+    if (CacheInvalidationCodec.hasJavaSerializationHeader(body)) {
+      RuntimeException legacyFailure = null;
+      try {
+        MultiLevelCacheEvictMessage legacyMessage =
+            deserializeLegacyInvalidationMessage(body, multiLevelCacheRedisTemplate);
+        if (legacyMessage != null) {
+          return legacyMessage;
+        }
+      } catch (RuntimeException exception) {
+        legacyFailure = exception;
+      }
+
+      try {
+        return CacheInvalidationCodec.deserialize(body);
+      } catch (RuntimeException stableCodecFailure) {
+        if (legacyFailure != null) {
+          stableCodecFailure.addSuppressed(legacyFailure);
+        }
+        throw stableCodecFailure;
+      }
+    }
+
     try {
       return CacheInvalidationCodec.deserialize(body);
     } catch (RuntimeException stableCodecFailure) {
-      Object legacyValue = multiLevelCacheRedisTemplate.getValueSerializer().deserialize(body);
-      if (legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage) {
+      MultiLevelCacheEvictMessage legacyMessage =
+          deserializeLegacyInvalidationMessage(body, multiLevelCacheRedisTemplate);
+      if (legacyMessage != null) {
         return legacyMessage;
       }
       throw stableCodecFailure;
     }
+  }
+
+  /** Deserializes an invalidation with the application's configured Redis value serializer. */
+  private static @Nullable MultiLevelCacheEvictMessage deserializeLegacyInvalidationMessage(
+      byte[] body, RedisTemplate<Object, Object> multiLevelCacheRedisTemplate) {
+    Object legacyValue = multiLevelCacheRedisTemplate.getValueSerializer().deserialize(body);
+    return legacyValue instanceof MultiLevelCacheEvictMessage legacyMessage ? legacyMessage : null;
   }
 }

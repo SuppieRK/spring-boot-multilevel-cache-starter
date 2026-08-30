@@ -30,19 +30,24 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Small message used by this caching library to sync eviction of entries when necessary */
+/**
+ * Serializable message used to synchronize local-cache invalidation between application instances.
+ *
+ * <p>A null {@link #entryKey} represents cache-wide invalidation. The sender identifier prevents a
+ * publisher from redundantly applying its own message.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class MultiLevelCacheEvictMessage implements Serializable {
   @Serial private static final long serialVersionUID = -6839296295008213886L;
 
-  /** Name of the cache affected by this eviction message */
+  /** Name of the cache affected by this invalidation message. */
   private String cacheName;
 
-  /** Specific cache entry key to evict; null means evict all local entries */
+  /** Specific cache entry key to evict; {@code null} means evict all local entries. */
   private String entryKey;
 
-  /** Unique identifier of the instance that initiated the eviction */
+  /** Unique identifier of the instance that initiated the eviction. */
   private String senderId;
 }

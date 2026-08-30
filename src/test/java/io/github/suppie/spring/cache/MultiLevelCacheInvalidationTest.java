@@ -88,6 +88,13 @@ class MultiLevelCacheInvalidationTest {
                 listener.onMessage(
                     new DefaultMessage("topic".getBytes(), "not-json".getBytes()), null))
         .doesNotThrowAnyException();
+    assertThatCode(
+            () ->
+                listener.onMessage(
+                    new DefaultMessage(
+                        "topic".getBytes(), new byte[] {(byte) 0xAC, (byte) 0xED, 0, 5, 1}),
+                    null))
+        .doesNotThrowAnyException();
     byte[] selfMessage =
         CacheInvalidationCodec.serialize(
             new MultiLevelCacheEvictMessage("known", "key", manager.getInstanceId()));

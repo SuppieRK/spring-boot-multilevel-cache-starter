@@ -34,9 +34,16 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
+/** Classifies Redis failures that permit seamless operation from the local cache tier. */
 final class RedisFailureClassifier {
   private RedisFailureClassifier() {}
 
+  /**
+   * Returns whether a failure represents an unavailable or timed-out Redis backend.
+   *
+   * @param throwable failure to inspect, including its cause chain
+   * @return {@code true} when local-cache fallback is safe
+   */
   static boolean isAvailabilityFailure(Throwable throwable) {
     Throwable current = unwrap(throwable);
     while (current != null) {
@@ -54,6 +61,12 @@ final class RedisFailureClassifier {
     return false;
   }
 
+  /**
+   * Removes asynchronous wrapper exceptions while retaining the underlying Redis failure.
+   *
+   * @param throwable failure to unwrap
+   * @return first cause that is not an asynchronous execution wrapper
+   */
   static Throwable unwrap(Throwable throwable) {
     Throwable current = throwable;
     while ((current instanceof CompletionException || current instanceof ExecutionException)
