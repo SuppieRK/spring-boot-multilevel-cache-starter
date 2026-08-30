@@ -67,7 +67,7 @@ public class MultiLevelCacheWriteBenchmark {
 
     @Setup(Level.Invocation)
     public void setUpInvocation() {
-      seed(KEY);
+      seedLocalOnly(KEY);
     }
   }
 

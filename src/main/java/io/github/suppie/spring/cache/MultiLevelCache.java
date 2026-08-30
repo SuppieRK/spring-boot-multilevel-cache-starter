@@ -32,8 +32,8 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -53,7 +53,9 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
  *
  * <p>Reads use the local Caffeine cache first and populate it from Redis after a miss. Mutations
  * update Redis when it is available, always leave the local tier in a usable state, and publish
- * invalidation messages so other application instances discard stale local entries.
+ * invalidation messages so other application instances discard stale local entries. Warm L1 reads
+ * remain lock-free; cold reads and mutations are serialized per key, while cache-wide mutations
+ * exclude those key operations.
  */
 @Slf4j
 public class MultiLevelCache extends RedisCache {
@@ -74,9 +76,7 @@ public class MultiLevelCache extends RedisCache {
   /** Circuit breaker protecting Redis I/O only. */
   protected final CircuitBreaker cacheCircuitBreaker;
 
-  private final Cache<@NonNull Object, AtomicLong> mutationVersions;
-  private final AtomicLong cacheVersion = new AtomicLong();
-  private final ReentrantLock cacheWideLock = new ReentrantLock();
+  private final ReentrantReadWriteLock cacheWideLock = new ReentrantReadWriteLock();
   private final RedisTemplate<Object, Object> redisTemplate;
   private final String instanceId;
 
@@ -134,7 +134,6 @@ public class MultiLevelCache extends RedisCache {
     this.cacheCircuitBreaker = Objects.requireNonNull(cacheCircuitBreaker);
     this.instanceId = Objects.requireNonNull(instanceId);
     this.locks = Caffeine.newBuilder().weakValues().build();
-    this.mutationVersions = Caffeine.newBuilder().weakValues().build();
   }
 
   /** Returns the local tier for package-level diagnostics and tests. */
@@ -161,8 +160,9 @@ public class MultiLevelCache extends RedisCache {
   /**
    * Looks up a value in L1 first and consults Redis only after a local miss.
    *
-   * <p>A concurrent mutation prevents an older Redis read from repopulating L1. Redis availability
-   * failures are treated as misses; serialization and programming failures are propagated.
+   * <p>Cold reads are serialized with same-key and cache-wide mutations so an older Redis read
+   * cannot repopulate L1 after invalidation. Redis availability failures are treated as misses;
+   * serialization and programming failures are propagated.
    *
    * @param key cache key
    * @return cached store value, or {@code null} after a miss or Redis availability failure
@@ -176,29 +176,56 @@ public class MultiLevelCache extends RedisCache {
       return localValue;
     }
 
-    VersionStamp stamp = captureVersion(localKey);
-    byte[] redisKey = serializeRedisKey(key);
-    RemoteCall<byte[]> remote = callRedis(() -> getCacheWriter().get(getName(), redisKey), "read");
-    if (!remote.available()) {
-      log.trace("Redis unavailable for cache '{}' and key '{}'", getName(), localKey);
-      return null;
+    ReentrantLock lock = makeLock(localKey);
+    lock.lock();
+    try {
+      return lookupWhileKeyLocked(key, localKey);
+    } finally {
+      lock.unlock();
     }
-    byte[] remoteBytes = remote.value();
-    if (remoteBytes == null) {
-      log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
-      return null;
-    }
+  }
 
-    Object value = deserializeNonNullCacheValue(remoteBytes);
-    if (value == NullValue.INSTANCE) {
-      log.debug(
-          "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
-      return null;
-    }
+  /**
+   * Consults both tiers while the caller holds the lock for {@code localKey}.
+   *
+   * <p>The cache-wide read lock prevents a concurrent clear from completing between the Redis read
+   * and the L1 population. The local tier is rechecked after acquiring it because a preceding
+   * same-key operation may already have populated the value.
+   */
+  private @Nullable Object lookupWhileKeyLocked(@NonNull Object key, String localKey) {
+    cacheWideLock.readLock().lock();
+    try {
+      Object localValue = localCache.getIfPresent(localKey);
+      if (localValue != null) {
+        return localValue;
+      }
 
-    populateLocalIfUnchanged(localKey, value, stamp);
-    log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
-    return value;
+      byte[] redisKey = serializeRedisKey(key);
+      RemoteCall<byte[]> remote =
+          callRedis(() -> getCacheWriter().get(getName(), redisKey), "read");
+      if (!remote.available()) {
+        log.trace("Redis unavailable for cache '{}' and key '{}'", getName(), localKey);
+        return null;
+      }
+      byte[] remoteBytes = remote.value();
+      if (remoteBytes == null) {
+        log.trace("Redis cache miss for cache '{}' and key '{}'", getName(), localKey);
+        return null;
+      }
+
+      Object value = deserializeNonNullCacheValue(remoteBytes);
+      if (value == NullValue.INSTANCE) {
+        log.debug(
+            "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
+        return null;
+      }
+
+      localCache.put(localKey, value);
+      log.trace("Redis cache hit for cache '{}' and key '{}'", getName(), localKey);
+      return value;
+    } finally {
+      cacheWideLock.readLock().unlock();
+    }
   }
 
   /**
@@ -230,7 +257,7 @@ public class MultiLevelCache extends RedisCache {
         return (T) localValue;
       }
 
-      Object remoteValue = lookup(key);
+      Object remoteValue = lookupWhileKeyLocked(key, localKey);
       if (remoteValue != null) {
         return (T) remoteValue;
       }
@@ -262,7 +289,8 @@ public class MultiLevelCache extends RedisCache {
    * Writes a value to Redis when available and always updates L1.
    *
    * <p>A {@code null} value is treated as eviction because this cache does not retain null entries.
-   * Successful Redis writes publish an invalidation to other nodes.
+   * Same-key and cache-wide mutations cannot cross the Redis-write-to-L1-commit window. Successful
+   * Redis writes publish an invalidation to other nodes.
    *
    * @param key cache key
    * @param value value to cache, or {@code null} to evict
@@ -278,17 +306,23 @@ public class MultiLevelCache extends RedisCache {
     byte[] redisKey = serializeRedisKey(key);
     byte[] redisValue = serializeCacheValue(value);
     Duration ttl = timeToLive(key, value);
-    markKeyMutation(localKey);
-
-    RemoteCall<Void> remote =
-        callRedis(
-            () -> {
-              getCacheWriter().put(getName(), redisKey, redisValue, ttl);
-              return null;
-            },
-            "write");
-
-    localCache.put(localKey, value);
+    ReentrantLock lock = makeLock(localKey);
+    RemoteCall<Void> remote;
+    lock.lock();
+    cacheWideLock.readLock().lock();
+    try {
+      remote =
+          callRedis(
+              () -> {
+                getCacheWriter().put(getName(), redisKey, redisValue, ttl);
+                return null;
+              },
+              "write");
+      localCache.put(localKey, value);
+    } finally {
+      cacheWideLock.readLock().unlock();
+      lock.unlock();
+    }
     if (remote.available()) {
       sendViaRedis(localKey);
     }
@@ -298,8 +332,9 @@ public class MultiLevelCache extends RedisCache {
    * Returns an existing L1 value without Redis I/O. Redis coordinates only cold L1 misses while it
    * is available.
    *
-   * <p>Concurrent calls on this node are serialized per local key. When Redis is unavailable, the
-   * candidate value remains available on this node so local caching continues seamlessly.
+   * <p>Warm L1 hits return before locking. Cold calls on this node are serialized per local key and
+   * recheck L1 after acquiring the lock. When Redis is unavailable, the candidate value remains
+   * available on this node so local caching continues seamlessly.
    *
    * @param key cache key
    * @param value candidate value, or {@code null} to evict
@@ -313,10 +348,16 @@ public class MultiLevelCache extends RedisCache {
     }
 
     String localKey = convertKey(key);
+    Object localValue = localCache.getIfPresent(localKey);
+    if (localValue != null) {
+      return new SimpleValueWrapper(localValue);
+    }
+
     ReentrantLock lock = makeLock(localKey);
     lock.lock();
+    cacheWideLock.readLock().lock();
     try {
-      Object localValue = localCache.getIfPresent(localKey);
+      localValue = localCache.getIfPresent(localKey);
       if (localValue != null) {
         return new SimpleValueWrapper(localValue);
       }
@@ -324,7 +365,6 @@ public class MultiLevelCache extends RedisCache {
       byte[] redisKey = serializeRedisKey(key);
       byte[] redisValue = serializeCacheValue(value);
       Duration ttl = timeToLive(key, value);
-      markKeyMutation(localKey);
       RemoteCall<byte[]> remote = remotePutIfAbsent(redisKey, redisValue, ttl);
 
       if (!remote.available()) {
@@ -371,6 +411,7 @@ public class MultiLevelCache extends RedisCache {
       localCache.put(localKey, existingValue);
       return new SimpleValueWrapper(existingValue);
     } finally {
+      cacheWideLock.readLock().unlock();
       lock.unlock();
     }
   }
@@ -384,15 +425,23 @@ public class MultiLevelCache extends RedisCache {
   public void evict(@NonNull Object key) {
     String localKey = convertKey(key);
     byte[] redisKey = serializeRedisKey(key);
-    markKeyMutation(localKey);
-    RemoteCall<Void> remote =
-        callRedis(
-            () -> {
-              getCacheWriter().evict(getName(), redisKey);
-              return null;
-            },
-            "evict");
-    localCache.invalidate(localKey);
+    ReentrantLock lock = makeLock(localKey);
+    RemoteCall<Void> remote;
+    lock.lock();
+    cacheWideLock.readLock().lock();
+    try {
+      remote =
+          callRedis(
+              () -> {
+                getCacheWriter().evict(getName(), redisKey);
+                return null;
+              },
+              "evict");
+      localCache.invalidate(localKey);
+    } finally {
+      cacheWideLock.readLock().unlock();
+      lock.unlock();
+    }
     if (remote.available()) {
       sendViaRedis(localKey);
     }
@@ -407,8 +456,15 @@ public class MultiLevelCache extends RedisCache {
 
   /** Applies a remote invalidation to one local entry without writing to Redis. */
   void invalidateLocalEntry(@NonNull String localKey) {
-    markKeyMutation(localKey);
-    localCache.invalidate(localKey);
+    ReentrantLock lock = makeLock(localKey);
+    lock.lock();
+    cacheWideLock.readLock().lock();
+    try {
+      localCache.invalidate(localKey);
+    } finally {
+      cacheWideLock.readLock().unlock();
+      lock.unlock();
+    }
   }
 
   /**
@@ -449,8 +505,12 @@ public class MultiLevelCache extends RedisCache {
 
   /** Applies a remote cache-wide invalidation without writing to Redis. */
   void invalidateLocalCache() {
-    cacheVersion.incrementAndGet();
-    localCache.invalidateAll();
+    cacheWideLock.writeLock().lock();
+    try {
+      localCache.invalidateAll();
+    } finally {
+      cacheWideLock.writeLock().unlock();
+    }
   }
 
   /**
@@ -460,35 +520,41 @@ public class MultiLevelCache extends RedisCache {
    */
   @Override
   public boolean invalidate() {
-    cacheWideLock.lock();
+    boolean hadLocalMappings;
+    RemoteCall<Boolean> remote;
+    cacheWideLock.writeLock().lock();
     try {
-      boolean hadLocalMappings = localCache.estimatedSize() > 0;
-      cacheVersion.incrementAndGet();
-      RemoteCall<Boolean> remote = callRedis(MultiLevelCache.super::invalidate, "invalidate");
+      hadLocalMappings = localCache.estimatedSize() > 0;
+      remote = callRedis(MultiLevelCache.super::invalidate, "invalidate");
       localCache.invalidateAll();
-      if (remote.available()) {
-        sendViaRedis(null);
-      }
-      return hadLocalMappings || Boolean.TRUE.equals(remote.value());
     } finally {
-      cacheWideLock.unlock();
+      cacheWideLock.writeLock().unlock();
     }
+    if (remote.available()) {
+      sendViaRedis(null);
+    }
+    return hadLocalMappings || Boolean.TRUE.equals(remote.value());
   }
 
   private void clearInternal(@Nullable String keyPattern) {
-    cacheVersion.incrementAndGet();
-    RemoteCall<Void> remote =
-        callRedis(
-            () -> {
-              if (keyPattern == null) {
-                MultiLevelCache.super.clear("*");
-              } else {
-                MultiLevelCache.super.clear(keyPattern);
-              }
-              return null;
-            },
-            "clear");
-    localCache.invalidateAll();
+    RemoteCall<Void> remote;
+    cacheWideLock.writeLock().lock();
+    try {
+      remote =
+          callRedis(
+              () -> {
+                if (keyPattern == null) {
+                  MultiLevelCache.super.clear("*");
+                } else {
+                  MultiLevelCache.super.clear(keyPattern);
+                }
+                return null;
+              },
+              "clear");
+      localCache.invalidateAll();
+    } finally {
+      cacheWideLock.writeLock().unlock();
+    }
     if (remote.available()) {
       sendViaRedis(null);
     }
@@ -587,34 +653,6 @@ public class MultiLevelCache extends RedisCache {
         locks.get(localKey, ignored -> new ReentrantLock()), LOCK_WAS_NOT_INITIALIZED);
   }
 
-  /** Captures per-key and cache-wide mutation versions before a remote read. */
-  private VersionStamp captureVersion(String localKey) {
-    AtomicLong keyVersion =
-        Objects.requireNonNull(
-            mutationVersions.get(localKey, ignored -> new AtomicLong()),
-            "Mutation version was not initialized");
-    return new VersionStamp(keyVersion, keyVersion.get(), cacheVersion.get());
-  }
-
-  /** Advances the version that prevents an older remote read from restoring this key. */
-  private void markKeyMutation(String localKey) {
-    Objects.requireNonNull(
-            mutationVersions.get(localKey, ignored -> new AtomicLong()),
-            "Mutation version was not initialized")
-        .incrementAndGet();
-  }
-
-  /** Populates L1 only while the key and cache versions match the pre-read snapshot. */
-  private void populateLocalIfUnchanged(String localKey, Object value, VersionStamp stamp) {
-    if (!stamp.isCurrent(cacheVersion)) {
-      return;
-    }
-    localCache.put(localKey, value);
-    if (!stamp.isCurrent(cacheVersion)) {
-      localCache.invalidate(localKey);
-    }
-  }
-
   private static RedisCacheConfiguration adjustRedisCacheConfiguration(
       MultiLevelCacheConfigurationProperties properties,
       RedisTemplate<Object, Object> redisTemplate) {
@@ -629,11 +667,4 @@ public class MultiLevelCache extends RedisCache {
 
   /** Result of Redis I/O, separating an unavailable backend from a legitimate null value. */
   private record RemoteCall<T>(boolean available, @Nullable T value) {}
-
-  /** Mutation snapshot used to reject stale Redis reads racing local invalidations. */
-  private record VersionStamp(AtomicLong keyVersion, long keyValue, long cacheValue) {
-    private boolean isCurrent(AtomicLong currentCacheVersion) {
-      return keyVersion.get() == keyValue && currentCacheVersion.get() == cacheValue;
-    }
-  }
 }

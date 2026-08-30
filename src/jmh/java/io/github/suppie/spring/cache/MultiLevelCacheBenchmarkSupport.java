@@ -17,6 +17,7 @@ import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 /** Shared deterministic state for {@link MultiLevelCache} benchmarks. */
@@ -33,6 +34,11 @@ public abstract class MultiLevelCacheBenchmarkSupport {
   public MultiLevelCache cache;
 
   protected final void initializeCache() {
+    initializeCache(new JdkSerializationRedisSerializer());
+  }
+
+  /** Initializes the benchmark cache with the requested legacy invalidation serializer. */
+  protected final void initializeCache(RedisSerializer<Object> valueSerializer) {
     disableCacheLogging();
 
     properties = new MultiLevelCacheConfigurationProperties();
@@ -42,7 +48,7 @@ public abstract class MultiLevelCacheBenchmarkSupport {
     writer = new InMemoryRedisCacheWriter();
     redisTemplate = new NoOpPubSubRedisTemplate();
     redisTemplate.setKeySerializer(new StringRedisSerializer());
-    redisTemplate.setValueSerializer(new JdkSerializationRedisSerializer());
+    redisTemplate.setValueSerializer(valueSerializer);
 
     localCache =
         Caffeine.newBuilder()
@@ -81,6 +87,11 @@ public abstract class MultiLevelCacheBenchmarkSupport {
     cache.put(key, VALUE);
   }
 
+  /** Seeds only L1 so setup does not execute Redis writes or invalidation serialization. */
+  protected final void seedLocalOnly(String key) {
+    localCache.put(cache.toLocalKey(key), VALUE);
+  }
+
   protected final void seedRemoteOnly(String key) {
     seed(key);
     localCache.invalidate(cache.toLocalKey(key));
@@ -97,12 +108,36 @@ public abstract class MultiLevelCacheBenchmarkSupport {
     }
   }
 
+  /** Replaces only L1 contents so inbound-listener setup stays out of measured JFR paths. */
+  protected final void resetLocalAndPopulate(int entryCount) {
+    localCache.invalidateAll();
+    for (int index = 0; index < entryCount; index++) {
+      seedLocalOnly(KEY + '-' + index);
+    }
+  }
+
+  /** Clears both benchmark tiers directly, avoiding mutation and publication setup work. */
+  protected final void resetTiersWithoutPublication() {
+    localCache.invalidateAll();
+    writer.clear(CACHE_NAME, null);
+  }
+
   protected final boolean isLocalPresent(String key) {
     return localCache.getIfPresent(cache.toLocalKey(key)) != null;
   }
 
   protected final boolean isRemotePresent(String key) {
     return (Object) cache.nativeGet(key) != null;
+  }
+
+  /** Returns the current L1 value without populating it from Redis. */
+  protected final Object localValue(String key) {
+    return localCache.getIfPresent(cache.toLocalKey(key));
+  }
+
+  /** Returns the current Redis value without consulting or populating L1. */
+  protected final Object remoteValue(String key) {
+    return cache.nativeGet(key);
   }
 
   protected final void requireAbsent(String key) {

@@ -40,6 +40,36 @@ class CacheInvalidationCodecTest {
   }
 
   @Test
+  void deserializeReadsNullEntryKeyProducedByExistingJsonSerializer() {
+    MultiLevelCacheEvictMessage message = new MultiLevelCacheEvictMessage("cache", null, "sender");
+    byte[] payload = RedisSerializer.json().serialize(message);
+
+    assertThat(CacheInvalidationCodec.deserialize(payload)).isEqualTo(message);
+  }
+
+  @Test
+  void deserializeReadsEscapedAndUnicodeValuesProducedByExistingJsonSerializer() {
+    MultiLevelCacheEvictMessage message =
+        new MultiLevelCacheEvictMessage("cache\"\\\n☃", "entry\t😀", "sender\rñ");
+    byte[] payload = RedisSerializer.json().serialize(message);
+
+    assertThat(CacheInvalidationCodec.deserialize(payload)).isEqualTo(message);
+  }
+
+  @Test
+  void deserializeAcceptsReorderedFieldsAndIgnoresUnknownFields() {
+    byte[] payload =
+        ("{\"@class\":\""
+                + MultiLevelCacheEvictMessage.class.getName()
+                + "\",\"senderId\":\"sender\",\"unknown\":\"ignored\","
+                + "\"entryKey\":\"entry\",\"cacheName\":\"cache\"}")
+            .getBytes(StandardCharsets.UTF_8);
+
+    assertThat(CacheInvalidationCodec.deserialize(payload))
+        .isEqualTo(new MultiLevelCacheEvictMessage("cache", "entry", "sender"));
+  }
+
+  @Test
   void recognizesStandardJavaSerializationStreamHeader() {
     byte[] legacyPayload =
         new JdkSerializationRedisSerializer()
@@ -64,12 +94,28 @@ class CacheInvalidationCodecTest {
   }
 
   @Test
-  void deserializeRejectsPayloadsOfTheWrongType() {
+  void deserializeRejectsMalformedJson() {
+    byte[] payload = "{not-json".getBytes(StandardCharsets.UTF_8);
+
+    assertThatThrownBy(() -> CacheInvalidationCodec.deserialize(payload))
+        .isInstanceOf(SerializationException.class);
+  }
+
+  @Test
+  void deserializeRejectsPayloadWithoutTypeMetadata() {
+    byte[] payload =
+        "{\"cacheName\":\"cache\",\"entryKey\":\"entry\",\"senderId\":\"sender\"}"
+            .getBytes(StandardCharsets.UTF_8);
+
+    assertThatThrownBy(() -> CacheInvalidationCodec.deserialize(payload))
+        .isInstanceOf(SerializationException.class);
+  }
+
+  @Test
+  void deserializeRejectsPayloadsWithUnrelatedTypeMetadata() {
     byte[] payload = RedisSerializer.json().serialize("not-an-invalidation-message");
 
     assertThatThrownBy(() -> CacheInvalidationCodec.deserialize(payload))
-        .isInstanceOf(SerializationException.class)
-        .hasMessageContaining("Expected cache invalidation message")
-        .hasMessageContaining(String.class.getName());
+        .isInstanceOf(SerializationException.class);
   }
 }

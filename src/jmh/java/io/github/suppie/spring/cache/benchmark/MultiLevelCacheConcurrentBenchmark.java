@@ -43,6 +43,16 @@ public class MultiLevelCacheConcurrentBenchmark {
     state.runWave(counters);
   }
 
+  @Benchmark
+  public void concurrentWarmPutIfAbsent(WarmPutIfAbsentState state, ContractCounters counters) {
+    state.runWave(counters);
+  }
+
+  @Benchmark
+  public void concurrentPut(MutationState state, ContractCounters counters) {
+    state.runWave(counters);
+  }
+
   abstract static class ConcurrentState extends MultiLevelCacheBenchmarkSupport {
     private final AtomicReference<Throwable> workerFailure = new AtomicReference<>();
     private ExecutorService executor;
@@ -249,6 +259,104 @@ public class MultiLevelCacheConcurrentBenchmark {
       return insertions == 1
           && winner != null
           && Arrays.stream(observedValues).allMatch(winner::equals);
+    }
+  }
+
+  /** Measures same-instance warm-L1 put-if-absent waves without Redis setup pollution. */
+  @State(Scope.Thread)
+  public static class WarmPutIfAbsentState extends ConcurrentState {
+    @Param({"2", "8", "32"})
+    public String concurrency;
+
+    private int workerCount;
+    private Object[] observedValues;
+
+    @Override
+    protected void initializeScenario() {
+      workerCount = Integer.parseInt(concurrency);
+      observedValues = new Object[workerCount];
+    }
+
+    @Override
+    protected int concurrency() {
+      return workerCount;
+    }
+
+    @Override
+    protected void prepareInvocation() {
+      Arrays.fill(observedValues, null);
+      resetTiersWithoutPublication();
+      seedLocalOnly(KEY);
+    }
+
+    @Override
+    protected void invoke(int workerIndex) {
+      ValueWrapper existing = cache.putIfAbsent(KEY, "candidate-" + workerIndex);
+      observedValues[workerIndex] = existing == null ? null : existing.get();
+    }
+
+    @Override
+    protected boolean contractSatisfied() {
+      return !isRemotePresent(KEY)
+          && Objects.equals(VALUE, localValue(KEY))
+          && Arrays.stream(observedValues).allMatch(VALUE::equals);
+    }
+  }
+
+  /** Compares same-key contention with independent-key mutation concurrency. */
+  @State(Scope.Thread)
+  public static class MutationState extends ConcurrentState {
+    @Param({"2", "8", "32"})
+    public String concurrency;
+
+    @Param KeyMode keyMode;
+
+    private int workerCount;
+
+    @Override
+    protected void initializeScenario() {
+      workerCount = Integer.parseInt(concurrency);
+    }
+
+    @Override
+    protected int concurrency() {
+      return workerCount;
+    }
+
+    @Override
+    protected void prepareInvocation() {
+      resetTiersWithoutPublication();
+    }
+
+    @Override
+    protected void invoke(int workerIndex) {
+      cache.put(key(workerIndex), candidate(workerIndex));
+    }
+
+    @Override
+    protected boolean contractSatisfied() {
+      if (keyMode == KeyMode.SAME_KEY) {
+        Object local = localValue(KEY);
+        Object remote = remoteValue(KEY);
+        return remote != null && (local == null || Objects.equals(local, remote));
+      }
+      for (int worker = 0; worker < workerCount; worker++) {
+        String key = key(worker);
+        String expected = candidate(worker);
+        Object local = localValue(key);
+        if (!expected.equals(remoteValue(key)) || (local != null && !expected.equals(local))) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    private String key(int workerIndex) {
+      return keyMode == KeyMode.SAME_KEY ? KEY : KEY + '-' + workerIndex;
+    }
+
+    private static String candidate(int workerIndex) {
+      return "candidate-" + workerIndex;
     }
   }
 

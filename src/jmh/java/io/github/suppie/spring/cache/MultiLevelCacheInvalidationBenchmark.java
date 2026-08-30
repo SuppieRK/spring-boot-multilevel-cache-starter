@@ -24,6 +24,7 @@ import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 
 /** Benchmarks public invalidation operations and inbound invalidation messages. */
 @BenchmarkMode(Mode.AverageTime)
@@ -58,6 +59,11 @@ public class MultiLevelCacheInvalidationBenchmark {
   @Benchmark
   public void receiveInvalidation(InboundState state) {
     state.listener.onMessage(state.message, null);
+  }
+
+  @Benchmark
+  public void publishEntryInvalidation(OutboundState state) {
+    state.cache.evict(KEY);
   }
 
   @State(Scope.Benchmark)
@@ -173,10 +179,10 @@ public class MultiLevelCacheInvalidationBenchmark {
     @Setup(Level.Invocation)
     public void setUpInvocation() {
       if (mode == InvalidationMode.STABLE_CACHE) {
-        resetAndPopulate(32);
+        resetLocalAndPopulate(32);
       } else {
-        resetAndPopulate(0);
-        seed(KEY);
+        resetLocalAndPopulate(0);
+        seedLocalOnly(KEY);
       }
     }
 
@@ -192,10 +198,69 @@ public class MultiLevelCacheInvalidationBenchmark {
     }
   }
 
+  /** Measures outbound encoding branches while only the Redis transport is stubbed. */
+  @State(Scope.Benchmark)
+  public static class OutboundState extends MultiLevelCacheBenchmarkSupport {
+    @Param OutboundSerializer serializer;
+
+    @Setup(Level.Trial)
+    public void setUpTrial() {
+      initializeCache(serializer.create());
+    }
+
+    @Setup(Level.Invocation)
+    public void setUpInvocation() {
+      resetTiersWithoutPublication();
+      seedLocalOnly(KEY);
+    }
+
+    @TearDown(Level.Invocation)
+    public void tearDownInvocation() {
+      requireAbsent(KEY);
+    }
+  }
+
   public enum InvalidationMode {
     STABLE_ENTRY,
     STABLE_CACHE,
     LEGACY_ENTRY
+  }
+
+  /** Legacy serializer modes supported by outbound invalidation publication. */
+  public enum OutboundSerializer {
+    JSON {
+      @Override
+      RedisSerializer<Object> create() {
+        return RedisSerializer.json();
+      }
+    },
+    JDK {
+      @Override
+      RedisSerializer<Object> create() {
+        return new JdkSerializationRedisSerializer();
+      }
+    },
+    UNSUPPORTED {
+      @Override
+      RedisSerializer<Object> create() {
+        return new UnsupportedRedisSerializer();
+      }
+    };
+
+    abstract RedisSerializer<Object> create();
+  }
+
+  /** Serializer representing applications whose configured value format cannot encode messages. */
+  static final class UnsupportedRedisSerializer implements RedisSerializer<Object> {
+    @Override
+    public byte[] serialize(Object value) {
+      throw new IllegalArgumentException("Benchmark serializer does not support invalidations");
+    }
+
+    @Override
+    public Object deserialize(byte[] bytes) {
+      return null;
+    }
   }
 
   static final class StubCacheManager extends MultiLevelCacheManager {

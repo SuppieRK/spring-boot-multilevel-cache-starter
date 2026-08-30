@@ -97,15 +97,7 @@ final class CacheInvalidationCodec {
    * @throws SerializationException when the payload is malformed or contains another value type
    */
   static @Nullable MultiLevelCacheEvictMessage deserialize(byte[] body) {
-    Object value = SERIALIZER.deserialize(body);
-    if (value == null) {
-      return null;
-    }
-    if (value instanceof MultiLevelCacheEvictMessage message) {
-      return message;
-    }
-    throw new SerializationException(
-        "Expected cache invalidation message but received " + value.getClass().getName());
+    return SERIALIZER.deserialize(body, MultiLevelCacheEvictMessage.class);
   }
 
   /**
