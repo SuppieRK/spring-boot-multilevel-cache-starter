@@ -62,6 +62,24 @@ Spring's asynchronous `Cache.retrieve(...)` methods are not yet multilevel-aware
 that require L1-first behavior should use the synchronous cache methods until async support is
 implemented.
 
+### Invalidation message compatibility
+
+Invalidation messaging will move to the stable JSON format over several releases so rolling
+upgrades do not silently leave stale L1 entries:
+
+1. Version `4.1.1.0` publishes both the stable v0 JSON message and, when different, the configured
+   legacy representation. It accepts both formats. This compatibility release allows every
+   application instance to learn the stable format while older instances still receive messages
+   they can decode.
+2. A later release will publish only the stable JSON message while continuing to accept both stable
+   and legacy messages. Before adopting that release, complete a rollout through `4.1.1.0` (or
+   another dual-publication release) on every instance that shares the invalidation topic.
+3. Legacy message decoding will be removed only in a subsequent release after the stable-only
+   publication transition has had a full compatibility window.
+
+Cache-value serialization is independent of this transition and remains controlled by the
+configured Redis serializer.
+
 ### Suitable for
 
 - Microservices working with immutable cached entities under low latency requirements
