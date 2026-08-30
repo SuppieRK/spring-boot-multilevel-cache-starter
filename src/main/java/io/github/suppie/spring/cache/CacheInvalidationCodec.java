@@ -67,7 +67,7 @@ final class CacheInvalidationCodec {
     byte @Nullable [] entryKey = quoteAsUtf8(encoder, message.getEntryKey());
     byte @Nullable [] senderId = quoteAsUtf8(encoder, message.getSenderId());
     long payloadLength =
-        (long) JSON_PREFIX.length
+        JSON_PREFIX.length
             + jsonValueLength(cacheName)
             + JSON_ENTRY_KEY.length
             + jsonValueLength(entryKey)

@@ -28,14 +28,14 @@ the in-memory tier, guarded by a Resilience4j circuit breaker.
 <dependency>
     <groupId>io.github.suppierk</groupId>
     <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-    <version>4.1.1.0</version>
+    <version>4.1.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.0'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.1'
 ```
 
 ### Examples
@@ -67,12 +67,12 @@ implemented.
 Invalidation messaging will move to the stable JSON format over several releases so rolling
 upgrades do not silently leave stale L1 entries:
 
-1. Version `4.1.1.0` publishes both the stable v0 JSON message and, when different, the configured
+1. Version `4.1.1.1` publishes both the stable v0 JSON message and, when different, the configured
    legacy representation. It accepts both formats. This compatibility release allows every
    application instance to learn the stable format while older instances still receive messages
    they can decode.
 2. A later release will publish only the stable JSON message while continuing to accept both stable
-   and legacy messages. Before adopting that release, complete a rollout through `4.1.1.0` (or
+   and legacy messages. Before adopting that release, complete a rollout through `4.1.1.1` (or
    another dual-publication release) on every instance that shares the invalidation topic.
 3. Legacy message decoding will be removed only in a subsequent release after the stable-only
    publication transition has had a full compatibility window.
