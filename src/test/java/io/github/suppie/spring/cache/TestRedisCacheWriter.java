@@ -24,6 +24,10 @@ final class TestRedisCacheWriter implements RedisCacheWriter {
 
   private volatile CountDownLatch getEntered;
   private volatile CountDownLatch releaseGet;
+  private volatile CountDownLatch putEntered;
+  private volatile CountDownLatch releasePut;
+  private volatile CountDownLatch putIfAbsentEntered;
+  private volatile CountDownLatch releasePutIfAbsent;
   private volatile CountDownLatch synchronizePutIfAbsent;
   private volatile RuntimeException failure;
 
@@ -34,6 +38,16 @@ final class TestRedisCacheWriter implements RedisCacheWriter {
   void blockNextGet(CountDownLatch entered, CountDownLatch release) {
     this.getEntered = entered;
     this.releaseGet = release;
+  }
+
+  void blockNextPut(CountDownLatch entered, CountDownLatch release) {
+    this.putEntered = entered;
+    this.releasePut = release;
+  }
+
+  void blockNextPutIfAbsent(CountDownLatch entered, CountDownLatch release) {
+    this.putIfAbsentEntered = entered;
+    this.releasePutIfAbsent = release;
   }
 
   void synchronizeNextPutIfAbsentCalls(int participants) {
@@ -68,6 +82,15 @@ final class TestRedisCacheWriter implements RedisCacheWriter {
     throwIfFailing();
     puts.incrementAndGet();
     values.put(new Key(name, key), copy(value));
+
+    CountDownLatch entered = putEntered;
+    CountDownLatch release = releasePut;
+    if (entered != null && release != null) {
+      putEntered = null;
+      releasePut = null;
+      entered.countDown();
+      await(release);
+    }
   }
 
   @Override
@@ -88,7 +111,16 @@ final class TestRedisCacheWriter implements RedisCacheWriter {
         synchronizePutIfAbsent = null;
       }
     }
-    return copy(values.putIfAbsent(new Key(name, key), copy(value)));
+    byte[] existing = copy(values.putIfAbsent(new Key(name, key), copy(value)));
+    CountDownLatch entered = putIfAbsentEntered;
+    CountDownLatch release = releasePutIfAbsent;
+    if (entered != null && release != null) {
+      putIfAbsentEntered = null;
+      releasePutIfAbsent = null;
+      entered.countDown();
+      await(release);
+    }
+    return existing;
   }
 
   @Override

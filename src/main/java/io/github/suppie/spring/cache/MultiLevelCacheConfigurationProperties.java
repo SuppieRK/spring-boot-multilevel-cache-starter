@@ -34,12 +34,12 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.util.StringUtils;
 
-/** Simple set of properties to control most aspects of the multi-level cache functionality */
+/** Configuration properties for Redis persistence, local caching, and Redis fault tolerance. */
 @Data
 @ConfigurationProperties(prefix = "spring.cache.multilevel")
 public class MultiLevelCacheConfigurationProperties {
 
-  /** Time to live for Redis entries */
+  /** Time to live for Redis entries. */
   private Duration timeToLive = Duration.ofHours(1L);
 
   /** Key prefix. */
@@ -48,18 +48,21 @@ public class MultiLevelCacheConfigurationProperties {
   /** Whether to use the key prefix when writing to Redis. */
   private boolean useKeyPrefix = false;
 
-  /** Topic to use to synchronize eviction of entries */
+  /** Redis topic used to synchronize local-entry invalidation between instances. */
   private String topic = "cache:multilevel:topic";
 
-  /** Small subset of local cache settings */
+  /** Local Caffeine cache settings. */
   @NestedConfigurationProperty private LocalCacheProperties local = new LocalCacheProperties();
 
-  /** Circuit breaker capability to avoid issues during Redis querying */
+  /** Circuit breaker settings used to detect Redis availability failures. */
   @NestedConfigurationProperty
   private CircuitBreakerProperties circuitBreaker = new CircuitBreakerProperties();
 
   /**
-   * @return configuration for Redis cache
+   * Builds the Redis cache configuration represented by these properties.
+   *
+   * @return configuration for Redis entries, TTL, and key prefixing
+   * @throws IllegalStateException when key-prefix use is enabled without a non-blank prefix
    */
   public RedisCacheConfiguration toRedisCacheConfiguration() {
     RedisCacheConfiguration configuration =
@@ -76,25 +79,25 @@ public class MultiLevelCacheConfigurationProperties {
     return configuration;
   }
 
-  /** Local cache settings for size limits and expiration strategy */
+  /** Local cache settings for size limits and expiration strategy. */
   @Data
   public static class LocalCacheProperties {
 
-    /** Maximum number of entities too store in local cache */
+    /** Maximum number of entries to store in the local cache. */
     private int maxSize = 2000;
 
-    /** Percentage of time deviation for local cache entry expiration */
+    /** Percentage of randomized deviation applied to local-entry expiration. */
     private int expiryJitter = 50;
 
-    /** Optional local TTL */
+    /** Optional local TTL; defaults to the Redis TTL when absent. */
     private Optional<Duration> timeToLive = Optional.empty();
 
-    /** Defaults to AFTER_CREATE to preserve previous behavior */
+    /** Event that resets local expiration; defaults to creation for compatibility. */
     private LocalExpirationMode expirationMode = LocalExpirationMode.AFTER_CREATE;
   }
 
   /**
-   * Circuit breaker just records calls to Redis - it does not time out them.
+   * Redis circuit-breaker settings. The breaker records calls but does not impose a timeout.
    *
    * <p>To simplify defaults, we rely on four core properties:
    *
@@ -122,28 +125,28 @@ public class MultiLevelCacheConfigurationProperties {
   @Data
   public static class CircuitBreakerProperties {
 
-    /** Percentage of call failures to prohibit further calls to Redis */
+    /** Percentage of failed calls required to open the breaker. */
     private int failureRateThreshold = 25;
 
-    /** Percentage of slow calls to prohibit further calls to Redis */
+    /** Percentage of slow calls required to open the breaker. */
     private int slowCallRateThreshold = 25;
 
-    /** Defines the duration after which Redis call considered to be slow */
+    /** Duration after which a Redis call is considered slow. */
     private Duration slowCallDurationThreshold = Duration.ofMillis(250);
 
-    /** A sliding window type for connectivity analysis */
+    /** Sliding-window type used for connectivity analysis. */
     private SlidingWindowType slidingWindowType = SlidingWindowType.COUNT_BASED;
 
-    /** Amount of Redis calls to test if backend is responsive when a circuit breaker closes */
+    /** Number of test calls permitted while the breaker is half-open. */
     private Integer permittedNumberOfCallsInHalfOpenState;
 
-    /** Amount of time to wait before closing circuit breaker, 0 - wait for all permitted calls. */
+    /** Maximum half-open wait; zero waits for all permitted calls. */
     private Duration maxWaitDurationInHalfOpenState;
 
-    /** Sliding window size for Redis calls analysis (calls / seconds) */
+    /** Sliding-window size in calls or seconds, depending on the window type. */
     private Integer slidingWindowSize;
 
-    /** Minimum number of calls which are required before calculating error or slow call rate */
+    /** Minimum calls required before calculating failure or slow-call rates. */
     private Integer minimumNumberOfCalls;
 
     /** Time to wait before permitting Redis calls to test backend connectivity. */

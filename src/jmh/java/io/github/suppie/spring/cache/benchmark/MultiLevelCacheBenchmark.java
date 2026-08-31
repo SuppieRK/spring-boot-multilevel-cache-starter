@@ -1,17 +1,12 @@
 package io.github.suppie.spring.cache.benchmark;
 
-import com.github.benmanes.caffeine.cache.Caffeine;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.suppie.spring.cache.MultiLevelCache;
-import io.github.suppie.spring.cache.MultiLevelCacheConfigurationProperties;
-import java.time.Duration;
-import java.util.Arrays;
+import static io.github.suppie.spring.cache.MultiLevelCacheBenchmarkSupport.KEY;
+
+import io.github.suppie.spring.cache.MultiLevelCacheBenchmarkSupport;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Level;
@@ -22,200 +17,146 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.infra.Blackhole;
-import org.springframework.data.redis.cache.CacheStatistics;
-import org.springframework.data.redis.cache.CacheStatisticsCollector;
-import org.springframework.data.redis.cache.RedisCacheWriter;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-/**
- * Baseline benchmarks for the current {@link MultiLevelCache} implementation that relies on a
- * synchronized {@code get(key, loader)} implementation. These benchmarks intentionally exercise the
- * existing behaviour so that subsequent optimisations can be compared against a stable baseline.
- */
+/** Benchmarks synchronous and asynchronous cache retrieval surfaces. */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@State(Scope.Benchmark)
 public class MultiLevelCacheBenchmark {
 
-  private static final String VALUE = "cached-value";
-
-  @Param({"1", "32"})
-  int keyCount;
-
-  private MultiLevelCache cache;
-  private String[] keys;
-
-  private Callable<Object> hitLoader;
-  private Callable<Object> producingLoader;
-  private final AtomicInteger missKeyCounter = new AtomicInteger();
-  private final AtomicInteger missValueCounter = new AtomicInteger();
-
-  @Setup(Level.Trial)
-  public void setUp() {
-    MultiLevelCacheConfigurationProperties properties =
-        new MultiLevelCacheConfigurationProperties();
-    properties.getLocal().setMaxSize(10_000);
-    properties.setTimeToLive(Duration.ofHours(1));
-
-    RedisTemplate<Object, Object> redisTemplate = new RedisTemplate<>();
-    redisTemplate.setKeySerializer(new StringRedisSerializer());
-    redisTemplate.setValueSerializer(new JdkSerializationRedisSerializer());
-
-    cache =
-        new MultiLevelCache(
-            "benchmark",
-            properties,
-            new InMemoryRedisCacheWriter(),
-            redisTemplate,
-            Caffeine.newBuilder()
-                .maximumSize(properties.getLocal().getMaxSize())
-                .expireAfterWrite(properties.getTimeToLive())
-                .build(),
-            CircuitBreaker.ofDefaults("benchmark"),
-            "benchmark-instance");
-
-    keys = new String[keyCount];
-    for (int i = 0; i < keyCount; i++) {
-      String key = "hit-key-" + i;
-      keys[i] = key;
-      cache.put(key, VALUE);
-    }
-
-    hitLoader = () -> VALUE;
-
-    producingLoader = () -> "value-" + missValueCounter.incrementAndGet();
+  @Benchmark
+  public void cacheHit(L1HitState state, ThreadState threadState, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(state.keys[state.nextIndex(threadState)], state.loader));
   }
 
   @Benchmark
-  @SuppressWarnings("unused")
-  public void cacheHit(ThreadState threadState, Blackhole blackhole) {
-    String key = keys[keyIndex(threadState)];
-    Object value = cache.get(key, hitLoader);
-    blackhole.consume(value);
+  public void cacheL2Hit(L2HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY, state.loader));
   }
 
   @Benchmark
-  @SuppressWarnings("unused")
-  public void cacheMissLoads(Blackhole blackhole) {
-    String key = "miss-key-" + missKeyCounter.incrementAndGet();
-    Object value = cache.get(key, producingLoader);
-    blackhole.consume(value);
+  public void cacheMissLoads(MissState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY, state.loader));
   }
 
-  private int keyIndex(ThreadState state) {
-    if (keys.length == 1) {
-      return 0;
+  @Benchmark
+  public void valueWrapperL1Hit(SingleL1HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY));
+  }
+
+  @Benchmark
+  public void valueWrapperL2Hit(L2HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY));
+  }
+
+  @Benchmark
+  public void valueWrapperMiss(MissState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY));
+  }
+
+  @Benchmark
+  public void typedGetL1Hit(SingleL1HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.get(KEY, String.class));
+  }
+
+  @Benchmark
+  public void retrieveL2Hit(L2HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.retrieve(KEY).join());
+  }
+
+  @Benchmark
+  public void retrieveMiss(MissState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.retrieve(KEY).join());
+  }
+
+  @Benchmark
+  public void retrieveWithLoaderL2Hit(L2HitState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.retrieve(KEY, state.asyncLoader).join());
+  }
+
+  @Benchmark
+  public void retrieveWithLoaderMiss(MissState state, Blackhole blackhole) {
+    blackhole.consume(state.cache.retrieve(KEY, state.asyncLoader).join());
+  }
+
+  @State(Scope.Benchmark)
+  public static class L1HitState extends MultiLevelCacheBenchmarkSupport {
+    @Param({"1", "32"})
+    int keyCount;
+
+    String[] keys;
+    Callable<Object> loader;
+
+    @Setup(Level.Trial)
+    public void setUp() {
+      initializeCache();
+      keys = new String[keyCount];
+      for (int index = 0; index < keyCount; index++) {
+        keys[index] = "hit-key-" + index;
+        seed(keys[index]);
+      }
+      loader = () -> VALUE;
     }
-    int next = state.nextIndex++;
-    if (next >= keys.length) {
-      next = 0;
-      state.nextIndex = 1;
+
+    int nextIndex(ThreadState state) {
+      if (keys.length == 1) {
+        return 0;
+      }
+      int next = state.nextIndex++;
+      if (next >= keys.length) {
+        next = 0;
+        state.nextIndex = 1;
+      }
+      return next;
     }
-    return next;
+  }
+
+  @State(Scope.Benchmark)
+  public static class SingleL1HitState extends MultiLevelCacheBenchmarkSupport {
+    @Setup(Level.Trial)
+    public void setUp() {
+      initializeCache();
+      seed(KEY);
+    }
+  }
+
+  @State(Scope.Benchmark)
+  public static class L2HitState extends MultiLevelCacheBenchmarkSupport {
+    Callable<Object> loader;
+    Supplier<CompletableFuture<Object>> asyncLoader;
+
+    @Setup(Level.Trial)
+    public void setUpTrial() {
+      initializeCache();
+      loader = () -> VALUE;
+      asyncLoader = () -> CompletableFuture.completedFuture(VALUE);
+    }
+
+    @Setup(Level.Invocation)
+    public void setUpInvocation() {
+      seedRemoteOnly(KEY);
+    }
+  }
+
+  @State(Scope.Benchmark)
+  public static class MissState extends MultiLevelCacheBenchmarkSupport {
+    Callable<Object> loader;
+    Supplier<CompletableFuture<Object>> asyncLoader;
+
+    @Setup(Level.Trial)
+    public void setUpTrial() {
+      initializeCache();
+      loader = () -> VALUE;
+      asyncLoader = () -> CompletableFuture.completedFuture(VALUE);
+    }
+
+    @Setup(Level.Invocation)
+    public void setUpInvocation() {
+      remove(KEY);
+    }
   }
 
   @State(Scope.Thread)
   public static class ThreadState {
     int nextIndex;
-  }
-
-  /**
-   * Simple in-memory implementation of {@link RedisCacheWriter} to avoid the need for a real Redis
-   * connection during benchmarking. Values stored here are never evicted to keep interactions
-   * deterministic.
-   */
-  static class InMemoryRedisCacheWriter implements RedisCacheWriter {
-
-    private final ConcurrentMap<String, ConcurrentMap<Key, byte[]>> store =
-        new ConcurrentHashMap<>();
-
-    @Override
-    public byte[] get(String name, byte[] key) {
-      ConcurrentMap<Key, byte[]> cache = store.get(name);
-      if (cache == null) {
-        return null;
-      }
-      return cache.get(new Key(key));
-    }
-
-    @Override
-    public CompletableFuture<byte[]> retrieve(String name, byte[] key, Duration ttl) {
-      return CompletableFuture.completedFuture(get(name, key));
-    }
-
-    @Override
-    public void put(String name, byte[] key, byte[] value, Duration ttl) {
-      store
-          .computeIfAbsent(name, k -> new ConcurrentHashMap<>())
-          .put(new Key(key), Arrays.copyOf(value, value.length));
-    }
-
-    @Override
-    public CompletableFuture<Void> store(String name, byte[] key, byte[] value, Duration ttl) {
-      put(name, key, value, ttl);
-      return CompletableFuture.completedFuture(null);
-    }
-
-    @Override
-    public byte[] putIfAbsent(String name, byte[] key, byte[] value, Duration ttl) {
-      return store
-          .computeIfAbsent(name, k -> new ConcurrentHashMap<>())
-          .putIfAbsent(new Key(key), Arrays.copyOf(value, value.length));
-    }
-
-    @Override
-    public void evict(String name, byte[] key) {
-      ConcurrentMap<Key, byte[]> cache = store.get(name);
-      if (cache != null) {
-        cache.remove(new Key(key));
-      }
-    }
-
-    @Override
-    public void clear(String name, byte[] pattern) {
-      store.remove(name);
-    }
-
-    @Override
-    public void clearStatistics(String name) {}
-
-    @Override
-    public RedisCacheWriter withStatisticsCollector(
-        CacheStatisticsCollector cacheStatisticsCollector) {
-      return null;
-    }
-
-    @Override
-    public CacheStatistics getCacheStatistics(String cacheName) {
-      return null;
-    }
-
-    private static final class Key {
-      private final byte[] value;
-      private final int hashCode;
-
-      private Key(byte[] value) {
-        this.value = Arrays.copyOf(value, value.length);
-        this.hashCode = Arrays.hashCode(this.value);
-      }
-
-      @Override
-      public boolean equals(Object o) {
-        if (this == o) {
-          return true;
-        }
-        if (!(o instanceof Key other)) {
-          return false;
-        }
-        return Arrays.equals(this.value, other.value);
-      }
-
-      @Override
-      public int hashCode() {
-        return hashCode;
-      }
-    }
   }
 }

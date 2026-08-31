@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
 import org.springframework.cache.Cache;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -133,17 +134,194 @@ class MultiLevelCacheRegressionTest {
     CountDownLatch releaseGet = new CountDownLatch(1);
     writer.blockNextGet(getEntered, releaseGet);
 
-    ExecutorService executor = Executors.newSingleThreadExecutor();
+    ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
       Future<Object> lookup = executor.submit(() -> cache.get("key").get());
       getEntered.await();
       cache.nativePut("key", "fresh");
-      cache.invalidateLocalEntry(cache.toLocalKey("key"));
+      CountDownLatch invalidationStarted = new CountDownLatch(1);
+      Future<?> invalidation =
+          executor.submit(
+              () -> {
+                invalidationStarted.countDown();
+                cache.invalidateLocalEntry(cache.toLocalKey("key"));
+              });
+      invalidationStarted.await();
+      assertThat(invalidation.isDone()).isFalse();
       releaseGet.countDown();
 
       assertThat(lookup.get()).isEqualTo("stale");
+      invalidation.get();
       assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
       assertThat(cache.get("key").get()).isEqualTo("fresh");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void cacheWideInvalidationWaitsForRemoteReadBeforeClearingLocalCache() throws Exception {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("cache-wide-stale-read"));
+    cache.nativePut("key", "stale");
+    CountDownLatch getEntered = new CountDownLatch(1);
+    CountDownLatch releaseGet = new CountDownLatch(1);
+    writer.blockNextGet(getEntered, releaseGet);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<Object> lookup = executor.submit(() -> cache.get("key").get());
+      getEntered.await();
+      CountDownLatch clearStarted = new CountDownLatch(1);
+      Future<?> clear =
+          executor.submit(
+              () -> {
+                clearStarted.countDown();
+                cache.clear();
+              });
+      clearStarted.await();
+      assertThat(clear.isDone()).isFalse();
+
+      releaseGet.countDown();
+      assertThat(lookup.get()).isEqualTo("stale");
+      clear.get();
+
+      assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+      assertThat((Object) cache.nativeGet("key")).isNull();
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void differentKeysDoNotShareTheSameOperationLock() throws Exception {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("different-key-locks"));
+    cache.nativePut("first", "one");
+    cache.nativePut("second", "two");
+    CountDownLatch getEntered = new CountDownLatch(1);
+    CountDownLatch releaseGet = new CountDownLatch(1);
+    writer.blockNextGet(getEntered, releaseGet);
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<Object> blocked = executor.submit(() -> cache.get("first").get());
+      getEntered.await();
+
+      assertThat(cache.get("second").get()).isEqualTo("two");
+      releaseGet.countDown();
+      assertThat(blocked.get()).isEqualTo("one");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void inboundInvalidationWaitsForPutBeforeEvictingLocalValue() throws Exception {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("put-invalidation-lock"));
+    CountDownLatch putEntered = new CountDownLatch(1);
+    CountDownLatch releasePut = new CountDownLatch(1);
+    writer.blockNextPut(putEntered, releasePut);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> put = executor.submit(() -> cache.put("key", "value"));
+      putEntered.await();
+      CountDownLatch invalidationStarted = new CountDownLatch(1);
+      Future<?> invalidation =
+          executor.submit(
+              () -> {
+                invalidationStarted.countDown();
+                cache.invalidateLocalEntry(cache.toLocalKey("key"));
+              });
+      invalidationStarted.await();
+      assertThat(invalidation.isDone()).isFalse();
+
+      releasePut.countDown();
+      put.get();
+      invalidation.get();
+
+      assertThat((Object) cache.nativeGet("key")).isEqualTo("value");
+      assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void warmPutIfAbsentDoesNotAcquireTheKeyLock() {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("warm-put-if-absent"));
+    String localKey = cache.toLocalKey("key");
+    TrackingReentrantLock lock = new TrackingReentrantLock();
+    cache.locks.put(localKey, lock);
+    cache.getLocalCache().put(localKey, "existing");
+
+    Cache.ValueWrapper result = cache.putIfAbsent("key", "candidate");
+
+    assertThat(result).isNotNull();
+    assertThat(result.get()).isEqualTo("existing");
+    assertThat(lock.lockCalls).hasValue(0);
+    assertThat(writer.putIfAbsentCalls).hasValue(0);
+  }
+
+  @Test
+  void putIfAbsentRechecksLocalCacheAfterAcquiringTheKeyLock() throws Exception {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("put-if-absent-recheck"));
+    String localKey = cache.toLocalKey("key");
+    TrackingReentrantLock lock = new TrackingReentrantLock();
+    lock.holdByTest();
+    cache.locks.put(localKey, lock);
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<Cache.ValueWrapper> result =
+          executor.submit(() -> cache.putIfAbsent("key", "candidate"));
+      lock.lockAttempted.await();
+      cache.getLocalCache().put(localKey, "existing");
+      lock.releaseByTest();
+
+      assertThat(result.get()).isNotNull();
+      assertThat(result.get().get()).isEqualTo("existing");
+      assertThat(lock.lockCalls).hasValue(1);
+      assertThat(writer.putIfAbsentCalls).hasValue(0);
+    } finally {
+      if (lock.isHeldByCurrentThread()) {
+        lock.releaseByTest();
+      }
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void sameInstanceColdPutIfAbsentCallsRedisOnce() throws Exception {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("same-instance-put-if-absent"));
+    CountDownLatch putIfAbsentEntered = new CountDownLatch(1);
+    CountDownLatch releasePutIfAbsent = new CountDownLatch(1);
+    writer.blockNextPutIfAbsent(putIfAbsentEntered, releasePutIfAbsent);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<Cache.ValueWrapper> first = executor.submit(() -> cache.putIfAbsent("key", "winner"));
+      putIfAbsentEntered.await();
+      Future<Cache.ValueWrapper> second =
+          executor.submit(() -> cache.putIfAbsent("key", "candidate"));
+      releasePutIfAbsent.countDown();
+
+      assertThat(first.get()).isNull();
+      assertThat(second.get()).isNotNull();
+      assertThat(second.get().get()).isEqualTo("winner");
+      assertThat(writer.putIfAbsentCalls).hasValue(1);
+      assertThat((Object) cache.nativeGet("key")).isEqualTo("winner");
     } finally {
       executor.shutdownNow();
     }
@@ -259,6 +437,26 @@ class MultiLevelCacheRegressionTest {
     @Override
     public String toString() {
       return "same-key";
+    }
+  }
+
+  private static final class TrackingReentrantLock extends ReentrantLock {
+    private final AtomicInteger lockCalls = new AtomicInteger();
+    private final CountDownLatch lockAttempted = new CountDownLatch(1);
+
+    @Override
+    public void lock() {
+      lockCalls.incrementAndGet();
+      lockAttempted.countDown();
+      super.lock();
+    }
+
+    private void holdByTest() {
+      super.lock();
+    }
+
+    private void releaseByTest() {
+      super.unlock();
     }
   }
 }

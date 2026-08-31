@@ -47,7 +47,9 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.core.RedisTemplate;
 
-/** Cache manager to cover basic operations */
+/**
+ * Spring cache manager that lazily creates Redis-backed caches with per-instance Caffeine L1 tiers.
+ */
 @Slf4j
 public class MultiLevelCacheManager implements CacheManager {
 
@@ -87,28 +89,27 @@ public class MultiLevelCacheManager implements CacheManager {
     this.requestedCacheNames.forEach(this::getCache);
   }
 
-  // Workarounds for tests
-
+  /** Returns configuration for package-level diagnostics and tests. */
   MultiLevelCacheConfigurationProperties getProperties() {
     return properties;
   }
 
+  /** Returns the shared Redis circuit breaker for package-level diagnostics and tests. */
   CircuitBreaker getCircuitBreaker() {
     return circuitBreaker;
   }
 
+  /** Returns the unique identifier attached to this manager's invalidation messages. */
   String getInstanceId() {
     return instanceId;
   }
 
-  // Workarounds for tests
-
   /**
-   * Get or create the cache associated with the given name.
+   * Gets or creates the cache associated with the given name.
    *
    * @param name the cache identifier (must not be {@code null})
-   * @return the associated cache, or {@code null} if such a cache does not exist or could be not
-   *     created
+   * @return the associated cache, or {@code null} when the configured cache-name allowlist excludes
+   *     the name
    */
   @Override
   public Cache getCache(@NonNull String name) {
@@ -132,7 +133,7 @@ public class MultiLevelCacheManager implements CacheManager {
   }
 
   /**
-   * Get a collection of the cache names known by this manager.
+   * Gets the cache names instantiated by this manager.
    *
    * @return the names of all caches known by the cache manager
    */
@@ -147,13 +148,19 @@ public class MultiLevelCacheManager implements CacheManager {
     return cache instanceof MultiLevelCache multiLevelCache ? multiLevelCache : null;
   }
 
-  /** Expiry policy enabling randomized expiry for local entities */
+  /** Caffeine expiry policy that applies randomized expiration to local entries. */
   static class RandomizedLocalExpiry implements Expiry<@NonNull Object, @NonNull Object> {
 
     private final Duration timeToLive;
     private final double expiryJitter;
     private final LocalExpirationMode expirationMode;
 
+    /**
+     * Creates an expiry policy from local settings, falling back to the Redis TTL.
+     *
+     * @param properties cache configuration containing TTL, jitter, and expiration mode
+     * @throws IllegalArgumentException when TTL or jitter is outside its supported range
+     */
     public RandomizedLocalExpiry(@NonNull MultiLevelCacheConfigurationProperties properties) {
       LocalCacheProperties localProperties = properties.getLocal();
       this.timeToLive = localProperties.getTimeToLive().orElse(properties.getTimeToLive());
@@ -177,6 +184,7 @@ public class MultiLevelCacheManager implements CacheManager {
       }
     }
 
+    /** {@inheritDoc} */
     @Override
     public long expireAfterCreate(@NonNull Object key, @NonNull Object value, long currentTime) {
       if (expirationMode == LocalExpirationMode.AFTER_CREATE) {
@@ -186,6 +194,7 @@ public class MultiLevelCacheManager implements CacheManager {
       }
     }
 
+    /** {@inheritDoc} */
     @Override
     public long expireAfterUpdate(
         @NonNull Object key, @NonNull Object value, long currentTime, long currentDuration) {
@@ -200,6 +209,7 @@ public class MultiLevelCacheManager implements CacheManager {
       }
     }
 
+    /** {@inheritDoc} */
     @Override
     public long expireAfterRead(
         @NonNull Object key, @NonNull Object value, long currentTime, long currentDuration) {

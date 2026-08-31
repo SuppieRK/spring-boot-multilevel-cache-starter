@@ -38,3 +38,9 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+tasks.withType(Javadoc).configureEach {
+	// JDK 21 reports record components as undocumented even when their @param tags and accessors are documented.
+	options.addBooleanOption('Xdoclint:all,-missing', true)
+	options.addBooleanOption('Werror', true)
+}
