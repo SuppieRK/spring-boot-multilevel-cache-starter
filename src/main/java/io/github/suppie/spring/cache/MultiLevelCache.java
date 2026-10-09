@@ -38,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.springframework.cache.support.NullValue;
-import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheWriter;
@@ -63,6 +62,8 @@ public class MultiLevelCache extends RedisCache {
   private static final String NO_REDIS_CONNECTION =
       "Redis connection factory was not found for RedisCacheWriter";
   private static final String LOCK_WAS_NOT_INITIALIZED = "Lock was not initialized";
+  private static final byte[] REDIS_NULL_VALUE =
+      Objects.requireNonNull(RedisSerializer.java().serialize(NullValue.INSTANCE));
 
   /** Configuration settings governing TTL, jitter, and other cache behavior. */
   protected final MultiLevelCacheConfigurationProperties properties;
@@ -214,7 +215,7 @@ public class MultiLevelCache extends RedisCache {
       }
 
       Object value = deserializeNonNullCacheValue(remoteBytes);
-      if (value == NullValue.INSTANCE) {
+      if (value == NullValue.INSTANCE && !isAllowNullValues()) {
         log.debug(
             "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
         return null;
@@ -237,16 +238,16 @@ public class MultiLevelCache extends RedisCache {
    * @param key cache key
    * @param valueLoader loader invoked after both tiers miss
    * @param <T> cached value type
-   * @return the cached or loaded non-null value
+   * @return the cached or loaded value, including {@code null} when null caching is enabled
    * @throws ValueRetrievalException when loading or storing the loaded value fails
    */
   @Override
   @SuppressWarnings("unchecked")
-  public <T> @NonNull T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
+  public <T> @Nullable T get(@NonNull Object key, @NonNull Callable<T> valueLoader) {
     String localKey = convertKey(key);
     Object localValue = localCache.getIfPresent(localKey);
     if (localValue != null) {
-      return (T) localValue;
+      return (T) fromStoreValue(localValue);
     }
 
     ReentrantLock lock = makeLock(localKey);
@@ -254,12 +255,12 @@ public class MultiLevelCache extends RedisCache {
     try {
       localValue = localCache.getIfPresent(localKey);
       if (localValue != null) {
-        return (T) localValue;
+        return (T) fromStoreValue(localValue);
       }
 
       Object remoteValue = lookupWhileKeyLocked(key, localKey);
       if (remoteValue != null) {
-        return (T) remoteValue;
+        return (T) fromStoreValue(remoteValue);
       }
 
       T loaded;
@@ -268,7 +269,7 @@ public class MultiLevelCache extends RedisCache {
       } catch (Exception exception) {
         throw new ValueRetrievalException(key, valueLoader, exception);
       }
-      if (loaded == null) {
+      if (loaded == null && !isAllowNullValues()) {
         throw new ValueRetrievalException(key, valueLoader, null);
       }
 
@@ -288,23 +289,24 @@ public class MultiLevelCache extends RedisCache {
   /**
    * Writes a value to Redis when available and always updates L1.
    *
-   * <p>A {@code null} value is treated as eviction because this cache does not retain null entries.
-   * Same-key and cache-wide mutations cannot cross the Redis-write-to-L1-commit window. Successful
-   * Redis writes publish an invalidation to other nodes.
+   * <p>A {@code null} value is cached only when null caching is enabled; otherwise it evicts the
+   * entry. Same-key and cache-wide mutations cannot cross the Redis-write-to-L1-commit window.
+   * Successful Redis writes publish an invalidation to other nodes.
    *
    * @param key cache key
-   * @param value value to cache, or {@code null} to evict
+   * @param value value to cache; {@code null} evicts when null caching is disabled
    */
   @Override
   public void put(@NonNull Object key, @Nullable Object value) {
-    if (value == null) {
+    if (value == null && !isAllowNullValues()) {
       evict(key);
       return;
     }
 
     String localKey = convertKey(key);
+    Object storeValue = toStoreValue(value);
     byte[] redisKey = serializeRedisKey(key);
-    byte[] redisValue = serializeCacheValue(value);
+    byte[] redisValue = serializeCacheValue(storeValue);
     Duration ttl = timeToLive(key, value);
     ReentrantLock lock = makeLock(localKey);
     RemoteCall<Void> remote;
@@ -318,7 +320,7 @@ public class MultiLevelCache extends RedisCache {
                 return null;
               },
               "write");
-      localCache.put(localKey, value);
+      localCache.put(localKey, storeValue);
     } finally {
       cacheWideLock.readLock().unlock();
       lock.unlock();
@@ -337,12 +339,12 @@ public class MultiLevelCache extends RedisCache {
    * available on this node so local caching continues seamlessly.
    *
    * @param key cache key
-   * @param value candidate value, or {@code null} to evict
+   * @param value candidate value; {@code null} evicts when null caching is disabled
    * @return the existing value, or {@code null} when the candidate was stored
    */
   @Override
   public @Nullable ValueWrapper putIfAbsent(@NonNull Object key, @Nullable Object value) {
-    if (value == null) {
+    if (value == null && !isAllowNullValues()) {
       evict(key);
       return null;
     }
@@ -350,7 +352,7 @@ public class MultiLevelCache extends RedisCache {
     String localKey = convertKey(key);
     Object localValue = localCache.getIfPresent(localKey);
     if (localValue != null) {
-      return new SimpleValueWrapper(localValue);
+      return toValueWrapper(localValue);
     }
 
     ReentrantLock lock = makeLock(localKey);
@@ -359,20 +361,21 @@ public class MultiLevelCache extends RedisCache {
     try {
       localValue = localCache.getIfPresent(localKey);
       if (localValue != null) {
-        return new SimpleValueWrapper(localValue);
+        return toValueWrapper(localValue);
       }
 
       byte[] redisKey = serializeRedisKey(key);
-      byte[] redisValue = serializeCacheValue(value);
+      Object storeValue = toStoreValue(value);
+      byte[] redisValue = serializeCacheValue(storeValue);
       Duration ttl = timeToLive(key, value);
       RemoteCall<byte[]> remote = remotePutIfAbsent(redisKey, redisValue, ttl);
 
       if (!remote.available()) {
-        localCache.put(localKey, value);
+        localCache.put(localKey, storeValue);
         return null;
       }
       if (remote.value() == null) {
-        localCache.put(localKey, value);
+        localCache.put(localKey, storeValue);
         sendViaRedis(localKey);
         return null;
       }
@@ -380,7 +383,7 @@ public class MultiLevelCache extends RedisCache {
       byte[] existingBytes =
           Objects.requireNonNull(remote.value(), "Available Redis value must not be null");
       Object existingValue = deserializeNonNullCacheValue(existingBytes);
-      if (existingValue == NullValue.INSTANCE) {
+      if (existingValue == NullValue.INSTANCE && !isAllowNullValues()) {
         RemoteCall<Void> removed =
             callRedis(
                 () -> {
@@ -389,17 +392,17 @@ public class MultiLevelCache extends RedisCache {
                 },
                 "remove legacy null");
         if (!removed.available()) {
-          localCache.put(localKey, value);
+          localCache.put(localKey, storeValue);
           return null;
         }
         RemoteCall<byte[]> retry = remotePutIfAbsent(redisKey, redisValue, ttl);
         if (!retry.available()) {
-          localCache.put(localKey, value);
+          localCache.put(localKey, storeValue);
           return null;
         }
         byte[] retryBytes = retry.value();
         if (retryBytes == null) {
-          localCache.put(localKey, value);
+          localCache.put(localKey, storeValue);
           sendViaRedis(localKey);
           return null;
         }
@@ -409,7 +412,7 @@ public class MultiLevelCache extends RedisCache {
         }
       }
       localCache.put(localKey, existingValue);
-      return new SimpleValueWrapper(existingValue);
+      return toValueWrapper(existingValue);
     } finally {
       cacheWideLock.readLock().unlock();
       lock.unlock();
@@ -634,6 +637,14 @@ public class MultiLevelCache extends RedisCache {
     return serializeCacheKey(createCacheKey(key));
   }
 
+  /** Recognizes Spring's persisted null marker independently of the null-caching policy. */
+  @Override
+  protected Object deserializeCacheValue(byte[] value) {
+    return Arrays.equals(value, REDIS_NULL_VALUE)
+        ? NullValue.INSTANCE
+        : super.deserializeCacheValue(value);
+  }
+
   private Object deserializeNonNullCacheValue(byte[] value) {
     return Objects.requireNonNull(
         deserializeCacheValue(value), "Redis value must not deserialize to null");
@@ -644,7 +655,7 @@ public class MultiLevelCache extends RedisCache {
         () -> getCacheWriter().putIfAbsent(getName(), key, value, ttl), "put-if-absent");
   }
 
-  private Duration timeToLive(Object key, Object value) {
+  private Duration timeToLive(Object key, @Nullable Object value) {
     return getCacheConfiguration().getTtlFunction().getTimeToLive(key, value);
   }
 
@@ -660,7 +671,6 @@ public class MultiLevelCache extends RedisCache {
         Objects.requireNonNull(redisTemplate.getValueSerializer(), "Value serializer is required");
     return properties
         .toRedisCacheConfiguration()
-        .disableCachingNullValues()
         .serializeValuesWith(
             RedisSerializationContext.SerializationPair.fromSerializer(valueSerializer));
   }

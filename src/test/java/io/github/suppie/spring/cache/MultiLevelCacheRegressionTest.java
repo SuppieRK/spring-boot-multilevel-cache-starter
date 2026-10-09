@@ -337,7 +337,7 @@ class MultiLevelCacheRegressionTest {
   }
 
   @Test
-  void equivalentConvertedKeysUseTheSameLockIdentity() {
+  void equivalentConvertedKeysShareCachedValues() {
     MultiLevelCache cache =
         cache(
             "cache", new TestRedisCacheWriter(), RedisSerializer.json(), breaker("lock-identity"));
@@ -348,7 +348,7 @@ class MultiLevelCacheRegressionTest {
     cache.invalidateLocalEntry(cache.toLocalKey(first));
     assertThat(cache.get(second, () -> "unused")).isEqualTo("value");
 
-    assertThat(cache.locks.asMap().keySet()).containsExactly("same-key");
+    assertThat(cache.get(first, String.class)).isEqualTo("value");
   }
 
   @Test

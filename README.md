@@ -28,14 +28,14 @@ the in-memory tier, guarded by a Resilience4j circuit breaker.
 <dependency>
     <groupId>io.github.suppierk</groupId>
     <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-    <version>4.1.1.2</version>
+    <version>4.1.1.3</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.2'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.3'
 ```
 
 ### Examples
@@ -53,14 +53,52 @@ implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.2'
   unavailable, the operation remains atomic only inside the current application instance.
 - Connection failures, timeouts, and an open circuit breaker fall back to local caching. Cache key
   conversion, serialization, validation, and programming errors are propagated to the caller.
-- Null values are not cached. `put(key, null)` and `putIfAbsent(key, null)` retain their existing
-  eviction behavior, and a loader returning null fails with `Cache.ValueRetrievalException`.
+- Null caching is opt in through `spring.cache.multilevel.cache-null-values=true`. By default,
+  `put(key, null)` and `putIfAbsent(key, null)` evict, and a null loader result fails with
+  `Cache.ValueRetrievalException`.
 - Redis Pub/Sub invalidation uses its own stable v0 JSON codec, independently of the configured
   cache-value serializer.
 
 Spring's asynchronous `Cache.retrieve(...)` methods are not yet multilevel-aware. Applications
 that require L1-first behavior should use the synchronous cache methods until async support is
 implemented.
+
+### Caching null results
+
+Enable null caching to avoid repeating lookups for missing data:
+
+```yaml
+spring:
+  cache:
+    multilevel:
+      cache-null-values: true
+```
+
+This applies to ordinary `@Cacheable`, `@Cacheable(sync=true)`, and synchronous Spring Cache
+operations. A cached null is a hit: `get(key)` returns a non-null wrapper containing null, typed
+and loader reads return null, and `putIfAbsent` preserves the existing entry. Null entries use the
+same expiration, capacity, and invalidation rules as other values, including during Redis outages.
+
+The local tier stores Spring's internal null sentinel; Redis uses Spring RedisCache's existing
+binary null representation. Null entries bypass the configured value serializer. Serialization
+of ordinary values and the invalidation message format are unchanged. Upgraded readers recognize
+stored null markers even with null caching disabled and treat those entries as misses.
+
+Before enabling this setting, upgrade every reader sharing the Redis cache namespace to a release
+with this support. Released `4.1.1.0` through `4.1.1.2` readers are incompatible: JSON and Fory
+readers throw on the marker, JDK readers recompute, and String readers can return an incorrect
+value. `4.1.0.0` recognizes the marker but can expose the internal sentinel on a warm loader read;
+its null loader path can also have written markers before this feature. Check other applications
+using standard RedisCache or reading the same keys directly. Keep a common null-caching policy
+across a namespace: disabled readers can recompute and overwrite enabled readers' cached nulls.
+
+To disable the feature, restart upgraded instances with the setting off. Persisted null entries
+remain until overwritten, evicted, or expired. Before rolling back to an incompatible reader,
+stop every null writer and clear the affected Redis cache namespace and local tiers, or verify
+that all null entries have expired. Waiting requires a known finite remaining Redis TTL after
+the last possible null write; entries with no expiration have no finite waiting guarantee.
+Choosing a distinct `key-prefix` with `use-key-prefix=true` can isolate null-enabled entries when
+older readers must coexist. Both active namespaces still need source-data invalidation.
 
 ### Invalidation message compatibility
 
@@ -129,6 +167,7 @@ for cache-wide invalidation. Non-JSON legacy payloads still use the configured v
 | Property                                        | Default                  | Notes                                                                                               |
 |-------------------------------------------------|--------------------------|-----------------------------------------------------------------------------------------------------|
 | `spring.cache.multilevel.time-to-live`          | `1h`                     | TTL applied to Redis entries; local cache derives its randomized expiry from here unless overridden |
+| `spring.cache.multilevel.cache-null-values`     | `false`                  | Cache null results in both tiers; upgrade all readers before enabling                               |
 | `spring.cache.multilevel.use-key-prefix`        | `false`                  | Enables `key-prefix`; set to `true` only when you supply a non-empty prefix                         |
 | `spring.cache.multilevel.key-prefix`            | `""`                     | Optional Redis key prefix                                                                           |
 | `spring.cache.multilevel.topic`                 | `cache:multilevel:topic` | Redis Pub/Sub channel used to broadcast evictions                                                   |
@@ -153,6 +192,7 @@ spring:
     multilevel:
       # Redis properties
       time-to-live: 1h
+      cache-null-values: false
       use-key-prefix: false
       key-prefix: ""
       topic: "cache:multilevel:topic"
