@@ -28,14 +28,14 @@ the in-memory tier, guarded by a Resilience4j circuit breaker.
 <dependency>
     <groupId>io.github.suppierk</groupId>
     <artifactId>spring-boot-multilevel-cache-starter</artifactId>
-    <version>4.1.1.1</version>
+    <version>4.1.1.2</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.1'
+implementation 'io.github.suppierk:spring-boot-multilevel-cache-starter:4.1.1.2'
 ```
 
 ### Examples
@@ -79,6 +79,11 @@ upgrades do not silently leave stale L1 entries:
 
 Cache-value serialization is independent of this transition and remains controlled by the
 configured Redis serializer.
+
+JSON invalidation messages are decoded using the fixed message schema, including legacy JSON
+without `@class` metadata. If metadata is present, it must identify `MultiLevelCacheEvictMessage`.
+The `cacheName` and `senderId` fields must be strings; `entryKey` may be a string, null, or omitted
+for cache-wide invalidation. Non-JSON legacy payloads still use the configured value serializer.
 
 ### Suitable for
 

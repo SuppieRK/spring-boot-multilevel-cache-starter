@@ -28,7 +28,11 @@ import java.nio.charset.StandardCharsets;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.SerializationException;
+import tools.jackson.core.JacksonException;
 import tools.jackson.core.io.JsonStringEncoder;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Encodes and decodes the stable v0 JSON wire format for cache invalidation messages.
@@ -50,7 +54,8 @@ final class CacheInvalidationCodec {
   private static final byte JAVA_STREAM_MAGIC_LOW = (byte) 0xED;
   private static final byte JAVA_STREAM_VERSION_HIGH = 0;
   private static final byte JAVA_STREAM_VERSION_LOW = 5;
-  private static final RedisSerializer<Object> SERIALIZER = RedisSerializer.json();
+  private static final JsonMapper JSON_READER =
+      JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
 
   private CacheInvalidationCodec() {}
 
@@ -90,14 +95,53 @@ final class CacheInvalidationCodec {
   }
 
   /**
-   * Deserializes the stable v0 JSON representation.
+   * Deserializes stable v0 and legacy JSON using the fixed invalidation message schema.
+   *
+   * <p>Legacy serializers may omit type metadata or null entry keys. When present, type metadata
+   * must identify an invalidation message; it never selects a Java type to instantiate.
    *
    * @param body serialized invalidation message
-   * @return decoded message, or {@code null} when the serializer regards the payload as empty
-   * @throws SerializationException when the payload is malformed or contains another value type
+   * @return decoded message, or {@code null} for an empty payload or JSON null
+   * @throws SerializationException when the payload is malformed or does not match the schema
    */
   static @Nullable MultiLevelCacheEvictMessage deserialize(byte[] body) {
-    return SERIALIZER.deserialize(body, MultiLevelCacheEvictMessage.class);
+    if (body.length == 0) return null;
+
+    JsonNode value;
+    try {
+      value = JSON_READER.readTree(body);
+    } catch (JacksonException exception) {
+      throw new SerializationException("Could not read cache invalidation JSON", exception);
+    }
+    if (value.isNull()) return null;
+    if (!value.isObject()) {
+      throw new SerializationException("Expected a cache invalidation JSON object");
+    }
+
+    JsonNode type = value.get("@class");
+    if (type != null
+        && (!type.isString()
+            || !MultiLevelCacheEvictMessage.class.getName().equals(type.stringValue()))) {
+      throw new SerializationException("Unexpected cache invalidation type metadata");
+    }
+
+    String cacheName = requiredString(value, "cacheName");
+    String senderId = requiredString(value, "senderId");
+    JsonNode entryKey = value.get("entryKey");
+    if (entryKey != null && !entryKey.isNull() && !entryKey.isString()) {
+      throw new SerializationException(
+          "Cache invalidation field 'entryKey' must be a string or null");
+    }
+    return new MultiLevelCacheEvictMessage(
+        cacheName, entryKey == null || entryKey.isNull() ? null : entryKey.stringValue(), senderId);
+  }
+
+  private static String requiredString(JsonNode value, String field) {
+    JsonNode property = value.get(field);
+    if (property == null || !property.isString()) {
+      throw new SerializationException("Cache invalidation field '" + field + "' must be a string");
+    }
+    return property.stringValue();
   }
 
   /**

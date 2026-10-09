@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.SerializationException;
@@ -91,6 +93,8 @@ class CacheInvalidationCodecTest {
   @Test
   void deserializeReturnsNullForAnEmptyPayload() {
     assertThat(CacheInvalidationCodec.deserialize(new byte[0])).isNull();
+    assertThat(CacheInvalidationCodec.deserialize("null".getBytes(StandardCharsets.UTF_8)))
+        .isNull();
   }
 
   @Test
@@ -102,12 +106,44 @@ class CacheInvalidationCodecTest {
   }
 
   @Test
-  void deserializeRejectsPayloadWithoutTypeMetadata() {
+  void deserializeAcceptsPayloadWithoutTypeMetadata() {
     byte[] payload =
         "{\"cacheName\":\"cache\",\"entryKey\":\"entry\",\"senderId\":\"sender\"}"
             .getBytes(StandardCharsets.UTF_8);
 
-    assertThatThrownBy(() -> CacheInvalidationCodec.deserialize(payload))
+    assertThat(CacheInvalidationCodec.deserialize(payload))
+        .isEqualTo(new MultiLevelCacheEvictMessage("cache", "entry", "sender"));
+  }
+
+  @Test
+  void deserializeAcceptsAnOmittedEntryKeyForCacheWideInvalidation() {
+    byte[] payload =
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\"}".getBytes(StandardCharsets.UTF_8);
+
+    assertThat(CacheInvalidationCodec.deserialize(payload))
+        .isEqualTo(new MultiLevelCacheEvictMessage("cache", null, "sender"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "[]",
+        "{}",
+        "{\"cacheName\":\"cache\"}",
+        "{\"senderId\":\"sender\"}",
+        "{\"cacheName\":null,\"senderId\":\"sender\"}",
+        "{\"cacheName\":7,\"senderId\":\"sender\"}",
+        "{\"cacheName\":\"cache\",\"senderId\":null}",
+        "{\"cacheName\":\"cache\",\"senderId\":[]}",
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\",\"entryKey\":false}",
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\",\"@class\":\"java.util.HashMap\"}",
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\",\"@class\":null}",
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\",\"@class\":7}",
+        "{\"cacheName\":\"cache\",\"senderId\":\"sender\"} {}"
+      })
+  void deserializeRejectsPayloadsOutsideTheInvalidationSchema(String json) {
+    assertThatThrownBy(
+            () -> CacheInvalidationCodec.deserialize(json.getBytes(StandardCharsets.UTF_8)))
         .isInstanceOf(SerializationException.class);
   }
 
