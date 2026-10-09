@@ -42,6 +42,9 @@ public class MultiLevelCacheConfigurationProperties {
   /** Time to live for Redis entries. */
   private Duration timeToLive = Duration.ofHours(1L);
 
+  /** Whether to cache null results; disabled by default for compatibility. */
+  private boolean cacheNullValues = false;
+
   /** Key prefix. */
   private String keyPrefix;
 
@@ -67,6 +70,9 @@ public class MultiLevelCacheConfigurationProperties {
   public RedisCacheConfiguration toRedisCacheConfiguration() {
     RedisCacheConfiguration configuration =
         RedisCacheConfiguration.defaultCacheConfig().entryTtl(timeToLive);
+    if (!cacheNullValues) {
+      configuration = configuration.disableCachingNullValues();
+    }
 
     if (useKeyPrefix) {
       if (!StringUtils.hasText(keyPrefix)) {
