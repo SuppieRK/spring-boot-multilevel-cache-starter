@@ -23,7 +23,7 @@ plugins {
 	// https://plugins.gradle.org/plugin/org.sonarqube
 	id 'org.sonarqube' version '7.5.0.8588'
 	// https://plugins.gradle.org/plugin/com.diffplug.spotless
-	id 'com.diffplug.spotless' version '8.10.3'
+	id 'com.diffplug.spotless' version '8.10.4'
 	// https://plugins.gradle.org/plugin/me.champeau.jmh
 	id 'me.champeau.jmh' version '0.7.3'
 }
@@ -86,7 +86,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.awaitility:awaitility'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
-	testImplementation 'org.apache.fory:fory-json:1.7.6'
+	testImplementation 'org.apache.fory:fory-json:1.7.7'
 }
 
 test {
