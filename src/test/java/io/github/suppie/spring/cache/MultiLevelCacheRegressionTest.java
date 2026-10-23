@@ -2,8 +2,12 @@ package io.github.suppie.spring.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -18,12 +22,97 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.Test;
 import org.springframework.cache.Cache;
+import org.springframework.cache.support.NullValue;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.SerializationException;
 
 class MultiLevelCacheRegressionTest {
+
+  @Test
+  void serializerDecodedNullValueIsAMissWhenNullCachingIsDisabled() {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("json-null-value"));
+    cache.nativePut("key", NullValue.INSTANCE);
+
+    assertThat(cache.get("key")).isNull();
+    assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+  }
+
+  @Test
+  void serializerDecodedNullValueIsAMissForTypedReadsWhenNullCachingIsDisabled() {
+    MultiLevelCache cache =
+        cache(
+            "cache",
+            new TestRedisCacheWriter(),
+            RedisSerializer.json(),
+            breaker("json-null-typed"));
+    cache.nativePut("key", NullValue.INSTANCE);
+
+    assertThat(cache.get("key", String.class)).isNull();
+    assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+  }
+
+  @Test
+  void serializerDecodedNullValueInvokesLoaderWhenNullCachingIsDisabled() {
+    MultiLevelCache cache =
+        cache(
+            "cache",
+            new TestRedisCacheWriter(),
+            RedisSerializer.json(),
+            breaker("json-null-loader"));
+    cache.nativePut("key", NullValue.INSTANCE);
+    AtomicInteger calls = new AtomicInteger();
+
+    assertThat(
+            cache.get(
+                "key",
+                () -> {
+                  calls.incrementAndGet();
+                  return "replacement";
+                }))
+        .isEqualTo("replacement");
+    assertThat(cache.get("key", () -> "unused")).isEqualTo("replacement");
+    assertThat(calls).hasValue(1);
+    assertThat((Object) cache.nativeGet("key")).isEqualTo("replacement");
+  }
+
+  @Test
+  void putIfAbsentReplacesSerializerDecodedNullValueWhenNullCachingIsDisabled() {
+    TestRedisCacheWriter writer = new TestRedisCacheWriter();
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("json-null-put-if-absent"));
+    cache.nativePut("key", NullValue.INSTANCE);
+
+    assertThat(cache.putIfAbsent("key", "replacement")).isNull();
+    assertThat(cache.get("key", String.class)).isEqualTo("replacement");
+    assertThat((Object) cache.nativeGet("key")).isEqualTo("replacement");
+    assertThat(writer.putIfAbsentCalls).hasValue(2);
+  }
+
+  @Test
+  void putIfAbsentIgnoresSerializerDecodedNullValueInsertedBeforeRetry() {
+    TestRedisCacheWriter writer = spy(new TestRedisCacheWriter());
+    MultiLevelCache cache =
+        cache("cache", writer, RedisSerializer.json(), breaker("json-null-retry"));
+    cache.nativePut("key", NullValue.INSTANCE);
+    doAnswer(
+            invocation -> {
+              invocation.callRealMethod();
+              // Simulate another writer inserting a null marker after eviction, before the retry.
+              cache.nativePut("key", NullValue.INSTANCE);
+              return null;
+            })
+        .when(writer)
+        .evict(eq("cache"), any(byte[].class));
+
+    assertThat(cache.putIfAbsent("key", "replacement")).isNull();
+    assertThat(cache.getLocalCache().getIfPresent(cache.toLocalKey("key"))).isNull();
+    assertThat(cache.get("key")).isNull();
+    assertThat(writer.putIfAbsentCalls).hasValue(2);
+  }
 
   @Test
   void localPutIfAbsentHitDoesNotCallRedis() {

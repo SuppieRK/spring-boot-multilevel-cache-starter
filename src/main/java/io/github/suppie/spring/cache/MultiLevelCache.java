@@ -215,7 +215,7 @@ public class MultiLevelCache extends RedisCache {
       }
 
       Object value = deserializeNonNullCacheValue(remoteBytes);
-      if (value == NullValue.INSTANCE && !isAllowNullValues()) {
+      if (value instanceof NullValue && !isAllowNullValues()) {
         log.debug(
             "Ignoring legacy Redis null value for cache '{}' and key '{}'", getName(), localKey);
         return null;
@@ -383,7 +383,7 @@ public class MultiLevelCache extends RedisCache {
       byte[] existingBytes =
           Objects.requireNonNull(remote.value(), "Available Redis value must not be null");
       Object existingValue = deserializeNonNullCacheValue(existingBytes);
-      if (existingValue == NullValue.INSTANCE && !isAllowNullValues()) {
+      if (existingValue instanceof NullValue && !isAllowNullValues()) {
         RemoteCall<Void> removed =
             callRedis(
                 () -> {
@@ -407,7 +407,7 @@ public class MultiLevelCache extends RedisCache {
           return null;
         }
         existingValue = deserializeNonNullCacheValue(retryBytes);
-        if (existingValue == NullValue.INSTANCE) {
+        if (existingValue instanceof NullValue) {
           return null;
         }
       }
