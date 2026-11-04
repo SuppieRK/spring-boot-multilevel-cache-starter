@@ -241,7 +241,7 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
     Assertions.assertEquals(
         key, cache.getLocalCache().getIfPresent(key), "Local cache must contain value");
 
-    Assertions.assertDoesNotThrow(() -> cache.clear(), "Method call should not throw an exception");
+    cache.clear();
     Awaitility.await()
         .pollInterval(AWAIT_POLL)
         .atMost(AWAIT_SHORT)
@@ -304,10 +304,7 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
           "fresh", remoteCache.nativeGet(key), "Remote cache must see an updated value");
     } finally {
       remoteListener.stop();
-      try {
-        remoteListener.destroy();
-      } catch (Exception ignored) {
-      }
+      Assertions.assertDoesNotThrow(remoteListener::destroy);
     }
   }
 

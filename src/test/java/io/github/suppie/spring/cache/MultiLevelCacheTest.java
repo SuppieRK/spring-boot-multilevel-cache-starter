@@ -234,12 +234,14 @@ class MultiLevelCacheTest {
     ExecutorService executor = Executors.newFixedThreadPool(concurrency);
     CountDownLatch ready = new CountDownLatch(concurrency);
     CountDownLatch start = new CountDownLatch(1);
+    CountDownLatch callsStarted = new CountDownLatch(concurrency);
     AtomicInteger loaderCalls = new AtomicInteger();
 
     Callable<String> loader =
         () -> {
           loaderCalls.incrementAndGet();
-          TimeUnit.MILLISECONDS.sleep(10);
+          Assertions.assertTrue(
+              callsStarted.await(5, TimeUnit.SECONDS), "Concurrent calls must reach the cache");
           return expectedValue;
         };
 
@@ -250,6 +252,7 @@ class MultiLevelCacheTest {
                       () -> {
                         ready.countDown();
                         start.await(5, TimeUnit.SECONDS);
+                        callsStarted.countDown();
                         return cache.get(key, loader);
                       })
               .limit(concurrency)

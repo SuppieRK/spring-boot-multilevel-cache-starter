@@ -399,12 +399,15 @@ class MultiLevelCacheNullValueTest {
 
     @Cacheable(cacheNames = "products", key = "#p0")
     public String find(String id) {
-      calls.incrementAndGet();
-      return null;
+      return loadMissingValue();
     }
 
     @Cacheable(cacheNames = "products", key = "#p0", sync = true)
     public String findSynchronized(String id) {
+      return loadMissingValue();
+    }
+
+    private String loadMissingValue() {
       calls.incrementAndGet();
       return null;
     }

@@ -142,8 +142,9 @@ class CacheInvalidationCodecTest {
         "{\"cacheName\":\"cache\",\"senderId\":\"sender\"} {}"
       })
   void deserializeRejectsPayloadsOutsideTheInvalidationSchema(String json) {
-    assertThatThrownBy(
-            () -> CacheInvalidationCodec.deserialize(json.getBytes(StandardCharsets.UTF_8)))
+    byte[] payload = json.getBytes(StandardCharsets.UTF_8);
+
+    assertThatThrownBy(() -> CacheInvalidationCodec.deserialize(payload))
         .isInstanceOf(SerializationException.class);
   }
 

@@ -364,59 +364,65 @@ public class MultiLevelCache extends RedisCache {
         return toValueWrapper(localValue);
       }
 
-      byte[] redisKey = serializeRedisKey(key);
-      Object storeValue = toStoreValue(value);
-      byte[] redisValue = serializeCacheValue(storeValue);
-      Duration ttl = timeToLive(key, value);
-      RemoteCall<byte[]> remote = remotePutIfAbsent(redisKey, redisValue, ttl);
-
-      if (!remote.available()) {
-        localCache.put(localKey, storeValue);
-        return null;
-      }
-      if (remote.value() == null) {
-        localCache.put(localKey, storeValue);
-        sendViaRedis(localKey);
-        return null;
-      }
-
-      byte[] existingBytes =
-          Objects.requireNonNull(remote.value(), "Available Redis value must not be null");
-      Object existingValue = deserializeNonNullCacheValue(existingBytes);
-      if (existingValue instanceof NullValue && !isAllowNullValues()) {
-        RemoteCall<Void> removed =
-            callRedis(
-                () -> {
-                  getCacheWriter().evict(getName(), redisKey);
-                  return null;
-                },
-                "remove legacy null");
-        if (!removed.available()) {
-          localCache.put(localKey, storeValue);
-          return null;
-        }
-        RemoteCall<byte[]> retry = remotePutIfAbsent(redisKey, redisValue, ttl);
-        if (!retry.available()) {
-          localCache.put(localKey, storeValue);
-          return null;
-        }
-        byte[] retryBytes = retry.value();
-        if (retryBytes == null) {
-          localCache.put(localKey, storeValue);
-          sendViaRedis(localKey);
-          return null;
-        }
-        existingValue = deserializeNonNullCacheValue(retryBytes);
-        if (existingValue instanceof NullValue) {
-          return null;
-        }
-      }
-      localCache.put(localKey, existingValue);
-      return toValueWrapper(existingValue);
+      return putIfAbsentWhileKeyLocked(key, localKey, value);
     } finally {
       cacheWideLock.readLock().unlock();
       lock.unlock();
     }
+  }
+
+  /** Coordinates a cold insertion with Redis while the key and cache-wide read locks are held. */
+  private @Nullable ValueWrapper putIfAbsentWhileKeyLocked(
+      @NonNull Object key, String localKey, @Nullable Object value) {
+    byte[] redisKey = serializeRedisKey(key);
+    Object storeValue = toStoreValue(value);
+    byte[] redisValue = serializeCacheValue(storeValue);
+    Duration ttl = timeToLive(key, value);
+    RemoteCall<byte[]> remote = remotePutIfAbsent(redisKey, redisValue, ttl);
+
+    if (!remote.available()) {
+      localCache.put(localKey, storeValue);
+      return null;
+    }
+    if (remote.value() == null) {
+      localCache.put(localKey, storeValue);
+      sendViaRedis(localKey);
+      return null;
+    }
+
+    byte[] existingBytes =
+        Objects.requireNonNull(remote.value(), "Available Redis value must not be null");
+    Object existingValue = deserializeNonNullCacheValue(existingBytes);
+    if (existingValue instanceof NullValue && !isAllowNullValues()) {
+      RemoteCall<Void> removed =
+          callRedis(
+              () -> {
+                getCacheWriter().evict(getName(), redisKey);
+                return null;
+              },
+              "remove legacy null");
+      if (!removed.available()) {
+        localCache.put(localKey, storeValue);
+        return null;
+      }
+      RemoteCall<byte[]> retry = remotePutIfAbsent(redisKey, redisValue, ttl);
+      if (!retry.available()) {
+        localCache.put(localKey, storeValue);
+        return null;
+      }
+      byte[] retryBytes = retry.value();
+      if (retryBytes == null) {
+        localCache.put(localKey, storeValue);
+        sendViaRedis(localKey);
+        return null;
+      }
+      existingValue = deserializeNonNullCacheValue(retryBytes);
+      if (existingValue instanceof NullValue) {
+        return null;
+      }
+    }
+    localCache.put(localKey, existingValue);
+    return toValueWrapper(existingValue);
   }
 
   /**

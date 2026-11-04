@@ -136,12 +136,15 @@ class MultiLevelCacheNullCacheableIntegrationTest extends AbstractRedisIntegrati
 
     @Cacheable(cacheNames = "annotated-nulls", key = "#p0")
     public String findOrdinary(String key) {
-      calls.incrementAndGet();
-      return null;
+      return loadMissingValue();
     }
 
     @Cacheable(cacheNames = "annotated-nulls", key = "#p0", sync = true)
     public String findSynchronized(String key) {
+      return loadMissingValue();
+    }
+
+    private String loadMissingValue() {
       calls.incrementAndGet();
       return null;
     }
