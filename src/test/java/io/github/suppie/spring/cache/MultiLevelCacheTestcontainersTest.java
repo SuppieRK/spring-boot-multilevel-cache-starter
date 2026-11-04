@@ -29,7 +29,9 @@ import java.time.Duration;
 import java.util.Objects;
 import org.awaitility.Awaitility;
 import org.jspecify.annotations.NonNull;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,6 +73,17 @@ class MultiLevelCacheTestcontainersTest extends AbstractRedisIntegrationTest {
   @Autowired
   @Qualifier(MultiLevelCacheAutoConfiguration.CACHE_REDIS_TEMPLATE_NAME)
   RedisTemplate<Object, Object> multiLevelCacheRedisTemplate;
+
+  @BeforeEach
+  void disableCircuitBreaker() {
+    // These tests verify Redis operations; runner latency must not switch them to L1 fallback.
+    circuitBreaker.transitionToDisabledState();
+  }
+
+  @AfterEach
+  void resetCircuitBreaker() {
+    circuitBreaker.reset();
+  }
 
   @Test
   void lookupTest() {
